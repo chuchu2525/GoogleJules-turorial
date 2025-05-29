@@ -1,0 +1,64 @@
+project:
+  name: "TODOアプリ"
+  description: "webアプリとして作成して、ただスマホでも使えるようなデザインや入力の仕組みも考えて"
+
+features:
+  basic_functions:
+    - name: "追加"
+      description: "タスクの追加機能"
+    - name: "削除"
+      description: "タスクの削除機能"
+    - name: "編集"
+      description: "タスクの編集機能"
+
+  advanced_functions:
+    - name: "依存関係の追加"
+      description: "タスク間の依存関係を設定"
+    - name: "ガントチャートの表示"
+      description: "タスクをガントチャート形式で表示"
+    - name: "ステータスの設定"
+      options:
+        - "完了"
+        - "進行中"
+        - "未進行"
+    - name: "重要度の設定"
+      options:
+        - "高"
+        - "中"
+        - "小"
+    - name: "タスク状況をプロンプトで整理する"
+      description: "AIを使ってタスクの整理を支援"
+
+data_management:
+  format: "yaml"
+  features:
+    - name: "YAML管理"
+      description: "タスク状況をyamlで管理"
+    - name: "AI制御"
+      description: "AIへ自然言語で指示するとyamlが書き換わり、TODO状況が変化する"
+      example: "〜のタスクを〜して（期限、ステータス、重要度）"
+    - name: "GUI制御"
+      description: "GUIでも直感的に整理できるようにする"
+      note: "yaml by AI でもいじれるが、GUIでも直感的に整理できる"
+
+ai_configuration:
+  default_model:
+    type: "OSS LLM"
+    cost: "無料"
+    description: "基本的に無料のAPI"
+
+  premium_model:
+    type: "有料API"
+    cost: "有料"
+    description: "有料のAPIも選択できるようにする"
+    authentication:
+      method: "API Key"
+      description: "API Keyを入力すれば使える仕組みにする"
+
+interface:
+  platforms:
+    - "web"
+    - "mobile"
+  design_requirements:
+    - "スマホでも使えるデザイン"
+    - "スマホでも使える入力の仕組み"
