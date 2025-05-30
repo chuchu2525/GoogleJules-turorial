@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Task Manager</title>
+    <style>
+        body { font-family: sans-serif; margin: 20px; }
+        ul { list-style-type: none; padding: 0; }
+        li { margin-bottom: 20px; padding: 10px; border: 1px solid #ccc; border-radius: 5px; }
+        li h3 { margin-top: 0; }
+        form { margin-bottom: 30px; padding: 15px; border: 1px solid #ddd; border-radius: 5px; background-color: #f9f9f9;}
+        label { display: block; margin-bottom: 5px; font-weight: bold; }
+        input[type="text"], textarea, select { width: calc(100% - 22px); padding: 10px; margin-bottom: 10px; border: 1px solid #ccc; border-radius: 4px; }
+        button { padding: 10px 15px; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; margin-right: 5px; }
+        button:hover { background-color: #0056b3; }
+        .edit-btn { background-color: #ffc107; }
+        .edit-btn:hover { background-color: #e0a800; }
+        .delete-btn { background-color: #dc3545; }
+        .delete-btn:hover { background-color: #c82333; }
+        .cancel-edit-btn { background-color: #6c757d; }
+        .cancel-edit-btn:hover { background-color: #5a6268; }
+        .task-details p { margin: 5px 0; }
+        .task-details strong { font-weight: bold; }
+        .task-actions button { margin-top:10px; }
+    </style>
+</head>
+<body>
+    <h1>Task Manager</h1>
+
+    <form id="taskForm">
+        <h2 id="formTitle">Add New Task</h2>
+        <input type="hidden" id="editTaskId" name="editTaskId">
+        <div>
+            <label for="name">Name:</label>
+            <input type="text" id="name" name="name" required>
+        </div>
+        <div>
+            <label for="description">Description:</label>
+            <textarea id="description" name="description" rows="3" required></textarea>
+        </div>
+        <div>
+            <label for="status">Status:</label>
+            <input type="text" id="status" name="status" placeholder="e.g., 未進行, 進行中, 完成">
+        </div>
+        <div>
+            <label for="priority">Priority:</label>
+            <input type="text" id="priority" name="priority" placeholder="e.g., 高, 中, 低">
+        </div>
+        <div>
+            <label for="dependencies">Dependencies (comma-separated IDs):</label>
+            <input type="text" id="dependencies" name="dependencies" placeholder="e.g., task_1,task_2">
+        </div>
+        <button type="submit" id="submitButton">Add Task</button>
+        <button type="button" id="cancelEditButton" class="cancel-edit-btn" style="display:none;">Cancel Edit</button>
+    </form>
+
+    <h2 id="tasksTitle">Current Tasks</h2>
+    <ul id="taskList">
+        <!-- Tasks will be loaded here by JavaScript -->
+    </ul>
+
+    <script src="/static/script.js"></script> <!-- Ensure this path is correct if you changed static handling in Flask -->
+</body>
+</html>
