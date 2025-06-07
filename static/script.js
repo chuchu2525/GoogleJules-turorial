@@ -50,7 +50,7 @@ document.addEventListener('DOMContentLoaded', () => {
         cancelEditButton.style.display = 'inline-block';
         window.scrollTo(0, 0); // Scroll to top to see the form
     }
-    
+
     // Make populateEditForm globally available
     window.populateEditForm = populateEditForm;
 
@@ -65,7 +65,7 @@ document.addEventListener('DOMContentLoaded', () => {
     cancelEditButton.addEventListener('click', resetForm);
 
     function renderTasks(tasks) {
-        taskListUl.innerHTML = ''; 
+        taskListUl.innerHTML = '';
         if (!tasks || tasks.length === 0) {
             taskListUl.innerHTML = '<li>No tasks found.</li>';
             return;
@@ -74,7 +74,7 @@ document.addEventListener('DOMContentLoaded', () => {
         tasks.forEach(task => {
             const li = document.createElement('li');
             li.setAttribute('data-task-id', task.id);
-            
+
             let dependenciesText = 'None';
             if (task.dependencies && task.dependencies.length > 0) {
                 dependenciesText = task.dependencies.join(', ');
@@ -111,7 +111,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const status = statusInput.value || '未進行';
         const priority = priorityInput.value || '中';
         const dependenciesRaw = dependenciesInput.value;
-        
+
         let dependencies = [];
         if (dependenciesRaw.trim() !== '') {
             dependencies = dependenciesRaw.split(',').map(dep => dep.trim()).filter(dep => dep !== '');

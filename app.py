@@ -71,7 +71,7 @@ def update_task_endpoint(task_id):
         # Ensure dependencies, if provided, is a list
         if 'dependencies' in data and not isinstance(data['dependencies'], list):
             return jsonify({"error": "Field 'dependencies' must be a list of task IDs"}), 400
-            
+
         updated_task = task_manager_instance.update_task(task_id, **data)
         if updated_task:
             return jsonify(updated_task), 200
@@ -81,7 +81,7 @@ def update_task_endpoint(task_id):
                  return jsonify({"error": f"Task with ID '{task_id}' not found"}), 404
             # If task exists but update failed for other reasons (though current update_task doesn't have such cases)
             # For now, this path might not be hit if update_task only returns None for "not found"
-            return jsonify({"error": f"Failed to update task with ID '{task_id}'"}), 400 
+            return jsonify({"error": f"Failed to update task with ID '{task_id}'"}), 400
 
     except Exception as e:
         return jsonify({"error": "An unexpected error occurred", "details": str(e)}), 500

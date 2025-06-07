@@ -35,7 +35,7 @@ class TaskManager:
                     if not created_new_file: # Save only if we didn't just create it
                         self._save_tasks()
                     return
-                
+
                 # Ensure data is a list, otherwise treat as invalid
                 if not isinstance(data, list):
                     print(f"Warning: {self.yaml_file} does not contain a valid list of tasks. Initializing with empty tasks.")
@@ -100,12 +100,12 @@ class TaskManager:
         """
         if dependencies is None:
             dependencies = []
-        
+
         task_id = f"task_{self.next_id}"
         self.next_id += 1
-        
+
         now = datetime.datetime.utcnow().isoformat()
-        
+
         task = {
             "id": task_id,
             "name": name,
@@ -116,7 +116,7 @@ class TaskManager:
             "created_at": now,
             "updated_at": now,
         }
-        
+
         self.tasks.append(task)
         self._save_tasks()
         return task
