@@ -9,6 +9,27 @@ This is a simple TODO application that allows users to manage tasks through a we
 *   **Web Interface:** A basic web UI to interact with tasks (view, add, edit, delete).
 *   **API Backend:** A Flask-based API provides endpoints for task management.
 
+## Technology Selection Rationale
+
+The technologies for this project were chosen for simplicity, ease of development, and suitability for the project's scale:
+
+*   **Backend (Python with Flask):**
+    *   **Simplicity and Rapid Development:** Flask is a lightweight micro-framework, allowing for quick setup and development of web applications and APIs.
+    *   **Python Ecosystem:** Leverages Python's extensive libraries and readable syntax, making development efficient.
+    *   **Suitability for Smaller Projects:** Ideal for projects like this task manager that don't require the complexity of larger frameworks.
+
+*   **Frontend (Vanilla JavaScript, HTML, CSS):**
+    *   **Lightweight UI:** Standard web technologies were chosen to create a simple and responsive user interface without the overhead of larger frontend frameworks.
+    *   **Direct DOM Manipulation:** Vanilla JavaScript is sufficient for the level of interactivity required, interacting directly with the Document Object Model (DOM).
+
+*   **Data Storage (YAML File - `tasks.yaml`):**
+    *   **Human-Readability:** YAML offers a simple, human-readable format for data, making it easy to inspect and manually edit if necessary.
+    *   **Self-Contained:** Using a file for storage avoids the need for a separate database server, simplifying setup and deployment for this application's scale.
+    *   **Ease of Use:** PyYAML library makes it straightforward to integrate YAML-based data persistence into the Python application.
+
+*   **AI-Assisted Development:**
+    *   The development process for this project is being assisted by an AI agent. This approach can accelerate development, help in exploring solutions, and aid in generating documentation and code.
+
 ## Local Setup and Running the Application
 
 Follow these steps to run the application on your local machine:
