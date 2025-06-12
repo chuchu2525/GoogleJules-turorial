@@ -1,3 +1,5 @@
+[日本語](README_ja.md)
+
 # GoogleJules-turorial
 try google jules
 
