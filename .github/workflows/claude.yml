@@ -19,8 +19,7 @@ jobs:
         run: |
           claude \
             -p "FizzBuzzをPythonで書いてください" \
-            --output-file result.json \
-            --output-format json
+            > result.txt
 
       - name: 結果を保存
         uses: actions/upload-artifact@v4
