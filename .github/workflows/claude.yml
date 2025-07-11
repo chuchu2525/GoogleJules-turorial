@@ -1,32 +1,44 @@
-name: Claude FizzBuzz Example
+name: Claude Dual Agent Implementation
 
 on:
-  push: # main ブランチなどに push されたとき実行
+  push:
 
 jobs:
-  run-agent:
+  generate-code:
+    strategy:
+      matrix:
+        agent_id: [agent-a, agent-b]
     runs-on: ubuntu-latest
+    name: Generate by ${{ matrix.agent_id }}
     steps:
-      - name: チェックアウト
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Claude CLI をインストール
+      - name: Install Claude CLI
         run: npm install -g @anthropic-ai/claude-code
 
-      - name: Claude CLI バージョン確認（念のため）
-        run: claude --version
-
-      - name: Claude でコード生成（診断付き）
+      - name: Generate implementation with Claude
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
-          echo "▶ Claude に問い合わせます..."
-          claude -p "FizzBuzzをPythonで書いてください" > result.txt
-          echo "▶ Claude 出力内容:"
-          cat result.txt || echo "result.txt が存在しません"
+          claude \
+            -p "以下の仕様を満たす Python 関数 fizzbuzz を fizzbuzz.py に定義してください。整数 n を受け取り、3の倍数ならFizz、5の倍数ならBuzz、15の倍数ならFizzBuzz、それ以外はその数を文字列で返してください。" \
+            > fizzbuzz_${{ matrix.agent_id }}.py
 
-      - name: 出力ファイルを保存（Artifacts）
+      - name: Save as module
+        run: |
+          mkdir -p modules/${{ matrix.agent_id }}
+          echo "$(cat fizzbuzz_${{ matrix.agent_id }}.py)" > modules/${{ matrix.agent_id }}/fizzbuzz.py
+
+      - name: Run test
+        run: |
+          cp -r tests .  # テストをコピー
+          cp modules/${{ matrix.agent_id }}/fizzbuzz.py fizzbuzz.py
+          pytest tests/ > test_result_${{ matrix.agent_id }}.txt || echo "テスト失敗"
+
+      - name: Upload results
         uses: actions/upload-artifact@v4
         with:
-          name: fizzbuzz-result
-          path: result.txt
+          name: result-${{ matrix.agent_id }}
+          path: |
+            fizzbuzz_${{ matrix.agent_id }}.py
+            test_result_${{ matrix.agent_id }}.txt
