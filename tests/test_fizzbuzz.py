@@ -1,4 +1,11 @@
-from fizzbuzz import fizzbuzz
+try:
+    from fizzbuzz import fizzbuzz
+except ImportError:
+    try:
+        from implementation import fizzbuzz
+    except ImportError:
+        print("実装ファイルが見つかりません")
+        exit(1)
 
 def test_fizzbuzz():
     assert fizzbuzz(15) == "FizzBuzz"

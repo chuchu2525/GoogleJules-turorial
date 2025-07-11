@@ -2,6 +2,30 @@ name: Claude Dual Agent Implementation
 
 on:
   push:
+  workflow_dispatch:
+    inputs:
+      task_prompt:
+        description: 'Claude に実行させるタスクのプロンプト'
+        required: true
+        default: 'FizzBuzzをPython関数 fizzbuzz(n: int) -> str で実装してください。仕様：3の倍数はFizz、5の倍数はBuzz、15の倍数はFizzBuzz、それ以外は数字の文字列を返す。'
+      programming_language:
+        description: 'プログラミング言語'
+        required: true
+        default: 'python'
+        type: choice
+        options:
+          - python
+          - javascript
+          - go
+          - java
+      file_extension:
+        description: 'ファイル拡張子'
+        required: true
+        default: 'py'
+      test_command:
+        description: 'テスト実行コマンド'
+        required: false
+        default: 'python -m pytest'
 
 jobs:
   generate-code:
@@ -25,14 +49,104 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
           echo "▶ Claude に問い合わせます（Agent: ${{ matrix.agent_id }})"
-          claude -p "FizzBuzzをPython関数 fizzbuzz(n: int) -> str で実装してください。仕様：3の倍数はFizz、5の倍数はBuzz、15の倍数はFizzBuzz、それ以外は数字の文字列を返す。" \
-          > fizzbuzz_${{ matrix.agent_id }}.py \
+          PROMPT="${{ github.event.inputs.task_prompt || 'FizzBuzzをPython関数 fizzbuzz(n: int) -> str で実装してください。仕様：3の倍数はFizz、5の倍数はBuzz、15の倍数はFizzBuzz、それ以外は数字の文字列を返す。' }}"
+          FILE_EXT="${{ github.event.inputs.file_extension || 'py' }}"
+          claude -p "$PROMPT" \
+          > output_${{ matrix.agent_id }}.$FILE_EXT \
           || echo "Claude 実行に失敗しました"
 
       - name: Claude 出力確認
-        run: cat fizzbuzz_${{ matrix.agent_id }}.py
+        run: |
+          FILE_EXT="${{ github.event.inputs.file_extension || 'py' }}"
+          cat output_${{ matrix.agent_id }}.$FILE_EXT
 
       - name: Claude 出力を保存
         run: |
           mkdir -p modules/${{ matrix.agent_id }}
-          cat fizzbuzz_${{ matrix.agent_id }}.py > modules/$
+          FILE_EXT="${{ github.event.inputs.file_extension || 'py' }}"
+          cat output_${{ matrix.agent_id }}.$FILE_EXT > modules/${{ matrix.agent_id }}/implementation.$FILE_EXT
+
+      - name: Python環境をセットアップ
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: pytest をインストール
+        run: pip install pytest
+
+      - name: テストを実行
+        run: |
+          FILE_EXT="${{ github.event.inputs.file_extension || 'py' }}"
+          TEST_CMD="${{ github.event.inputs.test_command || 'python -m pytest' }}"
+          
+          # テストファイルを各エージェントのモジュールディレクトリにコピー
+          if [ -d "tests" ]; then
+            cp -r tests/* modules/${{ matrix.agent_id }}/
+          fi
+          
+          cd modules/${{ matrix.agent_id }}
+          
+          # テストを実行し、結果を保存
+          if [ "$FILE_EXT" = "py" ]; then
+            $TEST_CMD -v > test_result.txt 2>&1 || echo "テストが失敗しました"
+          else
+            echo "プログラミング言語 $FILE_EXT のテストは未実装です" > test_result.txt
+          fi
+
+      - name: テスト結果を確認
+        run: cat modules/${{ matrix.agent_id }}/test_result.txt
+
+      - name: アーティファクトをアップロード
+        uses: actions/upload-artifact@v3
+        with:
+          name: ${{ matrix.agent_id }}-results
+          path: |
+            modules/${{ matrix.agent_id }}/implementation.*
+            modules/${{ matrix.agent_id }}/test_result.txt
+
+  compare-results:
+    needs: generate-code
+    runs-on: ubuntu-latest
+    name: 結果比較・評価
+    steps:
+      - name: チェックアウト
+        uses: actions/checkout@v4
+
+      - name: 全てのアーティファクトをダウンロード
+        uses: actions/download-artifact@v3
+
+      - name: 結果を比較
+        run: |
+          echo "=== エージェント結果比較 ===" > comparison_report.txt
+          echo "生成日時: $(date)" >> comparison_report.txt
+          echo "" >> comparison_report.txt
+          
+          for agent in agent-a agent-b; do
+            echo "--- $agent の結果 ---" >> comparison_report.txt
+            if [ -f "${agent}-results/test_result.txt" ]; then
+              echo "テスト結果:" >> comparison_report.txt
+              cat "${agent}-results/test_result.txt" >> comparison_report.txt
+            else
+              echo "テスト結果: ファイルが見つかりません" >> comparison_report.txt
+            fi
+            echo "" >> comparison_report.txt
+            
+            echo "実装コード:" >> comparison_report.txt
+            if [ -f "${agent}-results/implementation.py" ]; then
+              head -20 "${agent}-results/implementation.py" >> comparison_report.txt
+            elif [ -f "${agent}-results/implementation.js" ]; then
+              head -20 "${agent}-results/implementation.js" >> comparison_report.txt
+            else
+              echo "実装ファイルが見つかりません" >> comparison_report.txt
+            fi
+            echo "" >> comparison_report.txt
+          done
+
+      - name: 比較結果を表示
+        run: cat comparison_report.txt
+
+      - name: 比較レポートをアップロード
+        uses: actions/upload-artifact@v3
+        with:
+          name: comparison-report
+          path: comparison_report.txt
