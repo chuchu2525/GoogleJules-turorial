@@ -1,0 +1,29 @@
+name: Claude FizzBuzz Example
+
+on:
+  push: # ← main に push したら実行される
+
+jobs:
+  run-agent:
+    runs-on: ubuntu-latest
+    steps:
+      - name: チェックアウト
+        uses: actions/checkout@v4
+
+      - name: Claude CLI インストール
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Claude でコード生成
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          claude \
+            -p "FizzBuzzをPythonで書いてください" \
+            --output-file result.json \
+            --output-format json
+
+      - name: 結果を保存
+        uses: actions/upload-artifact@v4
+        with:
+          name: fizzbuzz-result
+          path: result.json
