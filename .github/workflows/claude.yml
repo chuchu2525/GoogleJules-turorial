@@ -121,11 +121,21 @@ jobs:
           echo "生成日時: $(date)" >> comparison_report.txt
           echo "" >> comparison_report.txt
           
+          # テスト成功したエージェントを特定
+          SUCCESSFUL_AGENTS=""
           for agent in agent-a agent-b; do
             echo "--- $agent の結果 ---" >> comparison_report.txt
             if [ -f "${agent}-results/test_result.txt" ]; then
               echo "テスト結果:" >> comparison_report.txt
               cat "${agent}-results/test_result.txt" >> comparison_report.txt
+              
+              # テスト成功判定
+              if grep -q "PASSED" "${agent}-results/test_result.txt" && ! grep -q "FAILED" "${agent}-results/test_result.txt"; then
+                SUCCESSFUL_AGENTS="$SUCCESSFUL_AGENTS $agent"
+                echo "✅ テスト成功" >> comparison_report.txt
+              else
+                echo "❌ テスト失敗" >> comparison_report.txt
+              fi
             else
               echo "テスト結果: ファイルが見つかりません" >> comparison_report.txt
             fi
@@ -141,6 +151,9 @@ jobs:
             fi
             echo "" >> comparison_report.txt
           done
+          
+          # 成功したエージェントを環境変数に保存
+          echo "SUCCESSFUL_AGENTS=$SUCCESSFUL_AGENTS" >> $GITHUB_ENV
 
       - name: 比較結果を表示
         run: cat comparison_report.txt
@@ -150,3 +163,121 @@ jobs:
         with:
           name: comparison-report
           path: comparison_report.txt
+
+  create-pr:
+    needs: compare-results
+    runs-on: ubuntu-latest
+    name: プルリクエスト作成
+    if: success()
+    steps:
+      - name: チェックアウト
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 全てのアーティファクトをダウンロード
+        uses: actions/download-artifact@v4
+
+      - name: 新しいブランチを作成
+        run: |
+          BRANCH_NAME="claude-implementation-$(date +%Y%m%d-%H%M%S)"
+          git checkout -b $BRANCH_NAME
+          echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
+
+      - name: 成功した実装を選択してコミット
+        run: |
+          # 最も優先度の高い成功実装を選択（agent-aを優先）
+          SELECTED_AGENT=""
+          for agent in agent-a agent-b; do
+            if [ -f "${agent}-results/test_result.txt" ]; then
+              if grep -q "PASSED" "${agent}-results/test_result.txt" && ! grep -q "FAILED" "${agent}-results/test_result.txt"; then
+                SELECTED_AGENT=$agent
+                break
+              fi
+            fi
+          done
+          
+          if [ -n "$SELECTED_AGENT" ]; then
+            echo "選択されたエージェント: $SELECTED_AGENT"
+            
+            # 実装ファイルをコピー
+            if [ -f "${SELECTED_AGENT}-results/implementation.py" ]; then
+              cp "${SELECTED_AGENT}-results/implementation.py" ./claude_generated_implementation.py
+            elif [ -f "${SELECTED_AGENT}-results/implementation.js" ]; then
+              cp "${SELECTED_AGENT}-results/implementation.js" ./claude_generated_implementation.js
+            fi
+            
+            # 比較レポートもコピー
+            cp comparison-report/comparison_report.txt ./claude_analysis_report.txt
+            
+            echo "SELECTED_AGENT=$SELECTED_AGENT" >> $GITHUB_ENV
+          else
+            echo "テストに成功した実装がありません"
+            exit 1
+          fi
+
+      - name: Git設定
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "Claude Auto-Implementation"
+
+      - name: 変更をコミット
+        run: |
+          git add claude_generated_implementation.* claude_analysis_report.txt
+          git commit -m "Add Claude-generated implementation
+
+          Task: ${{ github.event.inputs.task_prompt || 'FizzBuzz implementation' }}
+          Language: ${{ github.event.inputs.programming_language || 'python' }}
+          Selected Agent: $SELECTED_AGENT
+          
+          🤖 Generated with Claude Code via GitHub Actions
+          
+          Co-Authored-By: Claude <noreply@anthropic.com>"
+
+      - name: ブランチをプッシュ
+        run: git push origin $BRANCH_NAME
+
+      - name: プルリクエストを作成
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TASK_SUMMARY="${{ github.event.inputs.task_prompt || 'FizzBuzz implementation' }}"
+          LANGUAGE="${{ github.event.inputs.programming_language || 'python' }}"
+          
+          gh pr create --title "🤖 Claude実装: $TASK_SUMMARY" --body "$(cat <<'EOF'
+          ## 📋 実装概要
+          
+          **タスク**: $TASK_SUMMARY
+          **言語**: $LANGUAGE
+          **選択エージェント**: $SELECTED_AGENT
+          
+          ## 🔍 生成された実装
+          
+          Claude が並列実行で生成した実装のうち、テストに成功した実装を選択しました。
+          
+          ## 📊 分析レポート
+          
+          詳細な比較分析は `claude_analysis_report.txt` を参照してください。
+          
+          ## ✅ レビューポイント
+          
+          - [ ] 実装がタスク要件を満たしているか確認
+          - [ ] コードの品質・可読性をチェック
+          - [ ] セキュリティ上の問題がないか確認
+          - [ ] 既存コードベースとの整合性を確認
+          - [ ] テストケースの妥当性を確認
+          
+          ## 🔧 次のステップ
+          
+          1. コードレビューを実施
+          2. 必要に応じて修正
+          3. 追加テストの実行
+          4. マージ判断
+          
+          ---
+          
+          🤖 **自動生成**: このPRはGitHub Actions + Claude Code によって自動生成されました
+          
+          **Co-Authored-By**: Claude <noreply@anthropic.com>
+          EOF
+          )"

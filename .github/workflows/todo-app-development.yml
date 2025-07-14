@@ -1,0 +1,419 @@
+name: Todo App - Claude並列開発
+
+on:
+  workflow_dispatch:
+    inputs:
+      development_target:
+        description: '開発対象'
+        required: true
+        default: 'both'
+        type: choice
+        options:
+          - both
+          - backend
+          - frontend
+      task_description:
+        description: '開発タスクの説明'
+        required: true
+        default: 'Todo基本機能の実装'
+      feature_scope:
+        description: '機能スコープ'
+        required: true
+        default: 'crud'
+        type: choice
+        options:
+          - crud
+          - authentication
+          - ui_improvement
+          - deployment
+
+jobs:
+  backend-development:
+    if: ${{ github.event.inputs.development_target == 'backend' || github.event.inputs.development_target == 'both' }}
+    strategy:
+      matrix:
+        agent_id: [backend-agent-a, backend-agent-b]
+    runs-on: ubuntu-latest
+    name: バックエンド開発 (${{ matrix.agent_id }})
+    steps:
+      - name: チェックアウト
+        uses: actions/checkout@v4
+
+      - name: Node.js環境をセットアップ
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Claude CLI をインストール
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: バックエンド実装を生成
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          echo "▶ バックエンド実装を生成中 (Agent: ${{ matrix.agent_id }})"
+          
+          # API仕様書を読み込み
+          API_SPEC=$(cat todo-app/api-spec.md)
+          
+          # プロンプトを構築
+          BACKEND_PROMPT="Todo アプリのバックエンドAPIを Node.js + Express で実装してください。
+
+          タスク: ${{ github.event.inputs.task_description }}
+          機能スコープ: ${{ github.event.inputs.feature_scope }}
+
+          API仕様:
+          $API_SPEC
+
+          要件:
+          - Express.js を使用
+          - SQLite データベース
+          - 適切なエラーハンドリング
+          - バリデーション
+          - CORS対応
+          - セキュリティ考慮
+
+          出力: app.js ファイルとして完全な実装を生成"
+
+          claude -p "$BACKEND_PROMPT" > backend_implementation_${{ matrix.agent_id }}.js
+
+      - name: 生成されたバックエンドコードを確認
+        run: |
+          echo "=== 生成されたバックエンドコード (${{ matrix.agent_id }}) ==="
+          cat backend_implementation_${{ matrix.agent_id }}.js
+
+      - name: 実装をプロジェクト構造に配置
+        run: |
+          mkdir -p todo-app/backend-${{ matrix.agent_id }}/src
+          cp backend_implementation_${{ matrix.agent_id }}.js todo-app/backend-${{ matrix.agent_id }}/src/app.js
+          cp todo-app/backend/package.json todo-app/backend-${{ matrix.agent_id }}/
+          cp -r todo-app/backend/tests todo-app/backend-${{ matrix.agent_id }}/
+
+      - name: 依存関係をインストール
+        run: |
+          cd todo-app/backend-${{ matrix.agent_id }}
+          npm install
+
+      - name: バックエンドテストを実行
+        run: |
+          cd todo-app/backend-${{ matrix.agent_id }}
+          npm test > test_result.txt 2>&1 || echo "テストが失敗しました"
+          cat test_result.txt
+
+      - name: バックエンドアーティファクトをアップロード
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.agent_id }}-results
+          path: |
+            todo-app/backend-${{ matrix.agent_id }}/src/app.js
+            todo-app/backend-${{ matrix.agent_id }}/test_result.txt
+
+  frontend-development:
+    if: ${{ github.event.inputs.development_target == 'frontend' || github.event.inputs.development_target == 'both' }}
+    strategy:
+      matrix:
+        agent_id: [frontend-agent-a, frontend-agent-b]
+    runs-on: ubuntu-latest
+    name: フロントエンド開発 (${{ matrix.agent_id }})
+    steps:
+      - name: チェックアウト
+        uses: actions/checkout@v4
+
+      - name: Node.js環境をセットアップ
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Claude CLI をインストール
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: フロントエンド実装を生成
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          echo "▶ フロントエンド実装を生成中 (Agent: ${{ matrix.agent_id }})"
+          
+          # API仕様書を読み込み
+          API_SPEC=$(cat todo-app/api-spec.md)
+          
+          # プロンプトを構築
+          FRONTEND_PROMPT="Todo アプリのフロントエンドを React で実装してください。
+
+          タスク: ${{ github.event.inputs.task_description }}
+          機能スコープ: ${{ github.event.inputs.feature_scope }}
+
+          API仕様:
+          $API_SPEC
+
+          要件:
+          - React + JavaScript
+          - 関数コンポーネント + Hooks
+          - Todo一覧表示、追加、編集、削除機能
+          - レスポンシブデザイン
+          - 適切なエラーハンドリング
+          - ユーザビリティを考慮
+
+          出力: App.js ファイルとして完全な実装を生成"
+
+          claude -p "$FRONTEND_PROMPT" > frontend_implementation_${{ matrix.agent_id }}.js
+
+      - name: 生成されたフロントエンドコードを確認
+        run: |
+          echo "=== 生成されたフロントエンドコード (${{ matrix.agent_id }}) ==="
+          cat frontend_implementation_${{ matrix.agent_id }}.js
+
+      - name: 実装をプロジェクト構造に配置
+        run: |
+          mkdir -p todo-app/frontend-${{ matrix.agent_id }}/src
+          cp frontend_implementation_${{ matrix.agent_id }}.js todo-app/frontend-${{ matrix.agent_id }}/src/App.js
+          cp todo-app/frontend/package.json todo-app/frontend-${{ matrix.agent_id }}/
+          cp todo-app/frontend/src/App.test.js todo-app/frontend-${{ matrix.agent_id }}/src/
+          
+          # 基本的なindex.jsを作成
+          cat > todo-app/frontend-${{ matrix.agent_id }}/src/index.js << 'EOF'
+          import React from 'react';
+          import ReactDOM from 'react-dom/client';
+          import App from './App';
+          
+          const root = ReactDOM.createRoot(document.getElementById('root'));
+          root.render(<App />);
+          EOF
+
+      - name: 依存関係をインストール
+        run: |
+          cd todo-app/frontend-${{ matrix.agent_id }}
+          npm install
+
+      - name: フロントエンドテストを実行
+        run: |
+          cd todo-app/frontend-${{ matrix.agent_id }}
+          npm test -- --coverage --watchAll=false > test_result.txt 2>&1 || echo "テストが失敗しました"
+          cat test_result.txt
+
+      - name: フロントエンドアーティファクトをアップロード
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.agent_id }}-results
+          path: |
+            todo-app/frontend-${{ matrix.agent_id }}/src/App.js
+            todo-app/frontend-${{ matrix.agent_id }}/test_result.txt
+
+  compare-and-integrate:
+    needs: [backend-development, frontend-development]
+    if: always()
+    runs-on: ubuntu-latest
+    name: 結果比較・統合
+    steps:
+      - name: チェックアウト
+        uses: actions/checkout@v4
+
+      - name: 全てのアーティファクトをダウンロード
+        uses: actions/download-artifact@v4
+
+      - name: 開発結果を比較・分析
+        run: |
+          echo "=== Todo App 開発結果比較 ===" > integration_report.txt
+          echo "生成日時: $(date)" >> integration_report.txt
+          echo "開発対象: ${{ github.event.inputs.development_target }}" >> integration_report.txt
+          echo "タスク: ${{ github.event.inputs.task_description }}" >> integration_report.txt
+          echo "" >> integration_report.txt
+
+          # バックエンド結果分析
+          if [ "${{ github.event.inputs.development_target }}" = "backend" ] || [ "${{ github.event.inputs.development_target }}" = "both" ]; then
+            echo "## バックエンド開発結果" >> integration_report.txt
+            echo "" >> integration_report.txt
+            
+            BEST_BACKEND=""
+            for agent in backend-agent-a backend-agent-b; do
+              echo "### $agent" >> integration_report.txt
+              if [ -f "${agent}-results/test_result.txt" ]; then
+                echo "テスト結果:" >> integration_report.txt
+                cat "${agent}-results/test_result.txt" >> integration_report.txt
+                
+                if grep -q "PASS" "${agent}-results/test_result.txt" && [ -z "$BEST_BACKEND" ]; then
+                  BEST_BACKEND=$agent
+                  echo "✅ 最適なバックエンド実装として選択" >> integration_report.txt
+                fi
+              fi
+              echo "" >> integration_report.txt
+            done
+            
+            echo "BEST_BACKEND=$BEST_BACKEND" >> $GITHUB_ENV
+          fi
+
+          # フロントエンド結果分析
+          if [ "${{ github.event.inputs.development_target }}" = "frontend" ] || [ "${{ github.event.inputs.development_target }}" = "both" ]; then
+            echo "## フロントエンド開発結果" >> integration_report.txt
+            echo "" >> integration_report.txt
+            
+            BEST_FRONTEND=""
+            for agent in frontend-agent-a frontend-agent-b; do
+              echo "### $agent" >> integration_report.txt
+              if [ -f "${agent}-results/test_result.txt" ]; then
+                echo "テスト結果:" >> integration_report.txt
+                cat "${agent}-results/test_result.txt" >> integration_report.txt
+                
+                if grep -q "PASS" "${agent}-results/test_result.txt" && [ -z "$BEST_FRONTEND" ]; then
+                  BEST_FRONTEND=$agent
+                  echo "✅ 最適なフロントエンド実装として選択" >> integration_report.txt
+                fi
+              fi
+              echo "" >> integration_report.txt
+            done
+            
+            echo "BEST_FRONTEND=$BEST_FRONTEND" >> $GITHUB_ENV
+          fi
+
+      - name: 比較レポートを表示
+        run: cat integration_report.txt
+
+      - name: 統合レポートをアップロード
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-report
+          path: integration_report.txt
+
+  create-implementation-pr:
+    needs: compare-and-integrate
+    runs-on: ubuntu-latest
+    name: 実装PR作成
+    if: success()
+    steps:
+      - name: チェックアウト
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 全てのアーティファクトをダウンロード
+        uses: actions/download-artifact@v4
+
+      - name: 新しいブランチを作成
+        run: |
+          BRANCH_NAME="claude-todo-app-$(date +%Y%m%d-%H%M%S)"
+          git checkout -b $BRANCH_NAME
+          echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
+
+      - name: 最適な実装を統合
+        run: |
+          # 最適な実装を選択してコピー
+          if [ "${{ github.event.inputs.development_target }}" = "backend" ] || [ "${{ github.event.inputs.development_target }}" = "both" ]; then
+            for agent in backend-agent-a backend-agent-b; do
+              if [ -f "${agent}-results/app.js" ]; then
+                if grep -q "PASS" "${agent}-results/test_result.txt" 2>/dev/null; then
+                  cp "${agent}-results/app.js" "todo-app/backend/src/app.js"
+                  echo "バックエンド実装を $agent から統合しました"
+                  break
+                fi
+              fi
+            done
+          fi
+
+          if [ "${{ github.event.inputs.development_target }}" = "frontend" ] || [ "${{ github.event.inputs.development_target }}" = "both" ]; then
+            for agent in frontend-agent-a frontend-agent-b; do
+              if [ -f "${agent}-results/App.js" ]; then
+                if grep -q "PASS" "${agent}-results/test_result.txt" 2>/dev/null; then
+                  cp "${agent}-results/App.js" "todo-app/frontend/src/App.js"
+                  echo "フロントエンド実装を $agent から統合しました"
+                  break
+                fi
+              fi
+            done
+          fi
+
+          # 統合レポートもコピー
+          cp integration-report/integration_report.txt "todo-app/claude_development_report.txt"
+
+      - name: Git設定
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "Claude Todo App Developer"
+
+      - name: 変更をコミット
+        run: |
+          git add todo-app/
+          git commit -m "Add Claude-generated Todo App implementation
+
+          Target: ${{ github.event.inputs.development_target }}
+          Task: ${{ github.event.inputs.task_description }}
+          Scope: ${{ github.event.inputs.feature_scope }}
+          
+          🤖 Generated with Claude Code via GitHub Actions
+          
+          Co-Authored-By: Claude <noreply@anthropic.com>"
+
+      - name: ブランチをプッシュ
+        run: git push origin $BRANCH_NAME
+
+      - name: プルリクエストを作成
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr create --title "🚀 Todo App: ${{ github.event.inputs.task_description }}" --body "$(cat <<'EOF'
+          ## 📱 Todo App 実装
+
+          **開発対象**: ${{ github.event.inputs.development_target }}
+          **タスク**: ${{ github.event.inputs.task_description }}
+          **機能スコープ**: ${{ github.event.inputs.feature_scope }}
+
+          ## 🔧 実装内容
+
+          Claude並列開発ワークフローによって生成されたTodo アプリケーションの実装です。
+
+          ### バックエンド
+          - Node.js + Express
+          - SQLite データベース
+          - REST API (CRUD操作)
+          - 適切なエラーハンドリング
+
+          ### フロントエンド
+          - React + JavaScript
+          - 関数コンポーネント + Hooks
+          - レスポンシブデザイン
+          - API統合
+
+          ## 📊 開発分析
+
+          詳細な開発分析は `todo-app/claude_development_report.txt` を参照してください。
+
+          ## ✅ レビューポイント
+
+          - [ ] API仕様の準拠確認
+          - [ ] エラーハンドリングの妥当性
+          - [ ] セキュリティの確認
+          - [ ] UIの使いやすさ
+          - [ ] テストの網羅性
+          - [ ] コードの品質・保守性
+
+          ## 🧪 テスト実行
+
+          ```bash
+          # バックエンド
+          cd todo-app/backend
+          npm install
+          npm test
+
+          # フロントエンド
+          cd todo-app/frontend
+          npm install
+          npm test
+          ```
+
+          ## 🚀 動作確認
+
+          ```bash
+          # バックエンド起動
+          cd todo-app/backend
+          npm start
+
+          # フロントエンド起動（別ターミナル）
+          cd todo-app/frontend
+          npm start
+          ```
+
+          ---
+
+          🤖 **自動生成**: このPRはGitHub Actions + Claude Code によって自動生成されました
+
+          **Co-Authored-By**: Claude <noreply@anthropic.com>
+          EOF
+          )"
