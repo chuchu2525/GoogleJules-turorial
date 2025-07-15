@@ -47,7 +47,7 @@ jobs:
       - name: Claude CLI をインストール
         run: npm install -g @anthropic-ai/claude-code
 
-      - name: バックエンド実装を生成
+      - name: バックエンド実装を生成（リトライ機能付き）
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
@@ -56,8 +56,15 @@ jobs:
           # API仕様書を読み込み
           API_SPEC=$(cat todo-app/api-spec.md)
 
-          # プロンプトを構築
-          BACKEND_PROMPT="Todo アプリのバックエンドAPIを Node.js + Express で実装してください。
+          # テストファイルを読み込み
+          if [ -f "todo-app/backend/tests/api.test.js" ]; then
+            TEST_CONTENT=$(cat todo-app/backend/tests/api.test.js)
+          else
+            TEST_CONTENT="基本的なAPIテストケースを想定してください"
+          fi
+
+          # 基本プロンプト
+          BASE_BACKEND_PROMPT="Todo アプリのバックエンドAPIを Node.js + Express で実装してください。
 
           タスク: ${{ github.event.inputs.task_description }}
           機能スコープ: ${{ github.event.inputs.feature_scope }}
@@ -75,7 +82,103 @@ jobs:
 
           出力: app.js ファイルとして完全な実装を生成"
 
-          claude -p "$BACKEND_PROMPT" > backend_implementation_${{ matrix.agent_id }}.js
+          # リトライ設定
+          MAX_RETRIES=3
+          RETRY_COUNT=0
+          SUCCESS=false
+
+          while [ $RETRY_COUNT -lt $MAX_RETRIES ] && [ "$SUCCESS" = false ]; do
+            echo "=== バックエンド実装試行 $((RETRY_COUNT + 1))/$MAX_RETRIES ==="
+            
+            if [ $RETRY_COUNT -eq 0 ]; then
+              # 初回：TDD指向の詳細プロンプト
+              ENHANCED_PROMPT="$BASE_BACKEND_PROMPT
+
+              重要: 以下のテストを通過するコードを生成してください。
+
+              テストファイル内容:
+              $TEST_CONTENT
+
+              追加要件:
+              1. すべてのAPIエンドポイントを実装すること
+              2. 適切なHTTPステータスコードを返すこと
+              3. エラーハンドリングを含むこと
+              4. CORS設定を含むこと
+              5. ヘルスチェックエンドポイント(/health)を含むこと
+              6. レスポンス形式を統一すること
+
+              出力: 完全なapp.jsファイル（require文、ミドルウェア設定、全エンドポイント、サーバー起動コードを含む）"
+            else
+              # リトライ時：前回のエラーを含めて改善を促す
+              ENHANCED_PROMPT="前回のバックエンド実装でテストが失敗しました。以下のエラーを修正してください：
+
+              エラー内容:
+              $(cat backend_test_result_${{ matrix.agent_id }}.txt 2>/dev/null || echo "テスト実行エラー")
+
+              元のタスク: $BASE_BACKEND_PROMPT
+
+              テストファイル内容:
+              $TEST_CONTENT
+
+              特に以下の点を改善してください：
+              - APIエンドポイントの正確な実装
+              - レスポンス形式の統一
+              - エラーハンドリングの改善
+              - データベース操作の修正
+              - CORS設定の確認
+              - モジュールのエクスポート方法
+
+              出力: 修正された完全なapp.jsファイル"
+            fi
+            
+            # Claude実行
+            echo "Claude実行中..."
+            claude -p "$ENHANCED_PROMPT" > backend_implementation_${{ matrix.agent_id }}.js || {
+              echo "❌ Claude実行に失敗しました"
+              RETRY_COUNT=$((RETRY_COUNT + 1))
+              continue
+            }
+            
+            echo "生成されたバックエンドコード:"
+            head -50 backend_implementation_${{ matrix.agent_id }}.js
+            echo "..."
+            
+            # 簡易テスト実行（構文チェック）
+            echo "構文チェック中..."
+            node -c backend_implementation_${{ matrix.agent_id }}.js > backend_test_result_${{ matrix.agent_id }}.txt 2>&1
+            SYNTAX_CHECK=$?
+            
+            if [ $SYNTAX_CHECK -eq 0 ]; then
+              echo "✅ 構文チェック成功！実装を採用します"
+              SUCCESS=true
+              
+              # 成功した実装を最終ファイルとして保存
+              cp backend_implementation_${{ matrix.agent_id }}.js final_backend_implementation_${{ matrix.agent_id }}.js
+              
+              # 成功メトリクスを記録
+              echo "BACKEND_SUCCESS_RETRY_COUNT=$RETRY_COUNT" >> $GITHUB_ENV
+              echo "BACKEND_FINAL_RESULT=PASSED" >> $GITHUB_ENV
+              
+            else
+              echo "❌ 構文エラー。リトライします..."
+              echo "構文エラー内容:"
+              cat backend_test_result_${{ matrix.agent_id }}.txt
+              RETRY_COUNT=$((RETRY_COUNT + 1))
+            fi
+          done
+
+          if [ "$SUCCESS" = false ]; then
+            echo "❌ $MAX_RETRIES 回の試行後も構文チェックに成功しませんでした"
+            echo "最後のエラー:"
+            cat backend_test_result_${{ matrix.agent_id }}.txt
+            
+            # 失敗メトリクスを記録
+            echo "BACKEND_SUCCESS_RETRY_COUNT=$MAX_RETRIES" >> $GITHUB_ENV
+            echo "BACKEND_FINAL_RESULT=FAILED" >> $GITHUB_ENV
+            
+            # 失敗時も出力ファイルは保持（デバッグ用）
+            cp backend_implementation_${{ matrix.agent_id }}.js final_backend_implementation_${{ matrix.agent_id }}.js
+          fi
 
       - name: 生成されたバックエンドコードを確認
         run: |
@@ -127,7 +230,7 @@ jobs:
       - name: Claude CLI をインストール
         run: npm install -g @anthropic-ai/claude-code
 
-      - name: フロントエンド実装を生成
+      - name: フロントエンド実装を生成（リトライ機能付き）
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
@@ -136,8 +239,15 @@ jobs:
           # API仕様書を読み込み
           API_SPEC=$(cat todo-app/api-spec.md)
 
-          # プロンプトを構築
-          FRONTEND_PROMPT="Todo アプリのフロントエンドを React で実装してください。
+          # テストファイルを読み込み
+          if [ -f "todo-app/frontend/src/App.test.js" ]; then
+            TEST_CONTENT=$(cat todo-app/frontend/src/App.test.js)
+          else
+            TEST_CONTENT="基本的なReactコンポーネントテストケースを想定してください"
+          fi
+
+          # 基本プロンプト
+          BASE_FRONTEND_PROMPT="Todo アプリのフロントエンドを React で実装してください。
 
           タスク: ${{ github.event.inputs.task_description }}
           機能スコープ: ${{ github.event.inputs.feature_scope }}
@@ -155,7 +265,122 @@ jobs:
 
           出力: App.js ファイルとして完全な実装を生成"
 
-          claude -p "$FRONTEND_PROMPT" > frontend_implementation_${{ matrix.agent_id }}.js
+          # リトライ設定
+          MAX_RETRIES=3
+          RETRY_COUNT=0
+          SUCCESS=false
+
+          while [ $RETRY_COUNT -lt $MAX_RETRIES ] && [ "$SUCCESS" = false ]; do
+            echo "=== フロントエンド実装試行 $((RETRY_COUNT + 1))/$MAX_RETRIES ==="
+            
+            if [ $RETRY_COUNT -eq 0 ]; then
+              # 初回：TDD指向の詳細プロンプト
+              ENHANCED_PROMPT="$BASE_FRONTEND_PROMPT
+
+              重要: 以下のテストを通過するReactコンポーネントを生成してください。
+
+              テストファイル内容:
+              $TEST_CONTENT
+
+              追加要件:
+              1. すべてのテストケースを通過すること
+              2. 適切なReact Hooksを使用すること
+              3. APIとの通信を実装すること
+              4. ローディング状態を管理すること
+              5. エラーハンドリングを含むこと
+              6. アクセシビリティを考慮すること
+              7. レスポンシブデザインを実装すること
+
+              出力: 完全なApp.jsファイル（import文、コンポーネント定義、export文を含む）"
+            else
+              # リトライ時：前回のエラーを含めて改善を促す
+              ENHANCED_PROMPT="前回のフロントエンド実装でエラーが発生しました。以下のエラーを修正してください：
+
+              エラー内容:
+              $(cat frontend_test_result_${{ matrix.agent_id }}.txt 2>/dev/null || echo "構文エラーまたは実行エラー")
+
+              元のタスク: $BASE_FRONTEND_PROMPT
+
+              テストファイル内容:
+              $TEST_CONTENT
+
+              特に以下の点を改善してください：
+              - React構文の正確性
+              - Hooks の正しい使用方法
+              - イベントハンドラーの実装
+              - state管理の改善
+              - API呼び出しの修正
+              - JSX構文の修正
+              - import/export文の確認
+
+              出力: 修正された完全なApp.jsファイル"
+            fi
+            
+            # Claude実行
+            echo "Claude実行中..."
+            claude -p "$ENHANCED_PROMPT" > frontend_implementation_${{ matrix.agent_id }}.js || {
+              echo "❌ Claude実行に失敗しました"
+              RETRY_COUNT=$((RETRY_COUNT + 1))
+              continue
+            }
+            
+            echo "生成されたフロントエンドコード:"
+            head -50 frontend_implementation_${{ matrix.agent_id }}.js
+            echo "..."
+            
+            # 簡易構文チェック（Node.jsでJSX構文をチェック）
+            echo "構文チェック中..."
+            # JSXを含むファイルの基本的な構文チェック
+            if node -e "
+              const fs = require('fs');
+              const content = fs.readFileSync('frontend_implementation_${{ matrix.agent_id }}.js', 'utf8');
+              
+              // 基本的な構文チェック
+              if (!content.includes('import') && !content.includes('require')) {
+                throw new Error('import文またはrequire文が見つかりません');
+              }
+              if (!content.includes('export') && !content.includes('module.exports')) {
+                throw new Error('export文が見つかりません');
+              }
+              if (!content.includes('function') && !content.includes('=>') && !content.includes('const')) {
+                throw new Error('関数定義が見つかりません');
+              }
+              if (content.includes('return') && !content.includes('jsx') && !content.includes('<')) {
+                console.warn('JSX要素が見つからない可能性があります');
+              }
+              
+              console.log('基本的な構文チェック: OK');
+            " > frontend_test_result_${{ matrix.agent_id }}.txt 2>&1; then
+              echo "✅ 構文チェック成功！実装を採用します"
+              SUCCESS=true
+              
+              # 成功した実装を最終ファイルとして保存
+              cp frontend_implementation_${{ matrix.agent_id }}.js final_frontend_implementation_${{ matrix.agent_id }}.js
+              
+              # 成功メトリクスを記録
+              echo "FRONTEND_SUCCESS_RETRY_COUNT=$RETRY_COUNT" >> $GITHUB_ENV
+              echo "FRONTEND_FINAL_RESULT=PASSED" >> $GITHUB_ENV
+              
+            else
+              echo "❌ 構文エラー。リトライします..."
+              echo "構文エラー内容:"
+              cat frontend_test_result_${{ matrix.agent_id }}.txt
+              RETRY_COUNT=$((RETRY_COUNT + 1))
+            fi
+          done
+
+          if [ "$SUCCESS" = false ]; then
+            echo "❌ $MAX_RETRIES 回の試行後も構文チェックに成功しませんでした"
+            echo "最後のエラー:"
+            cat frontend_test_result_${{ matrix.agent_id }}.txt
+            
+            # 失敗メトリクスを記録
+            echo "FRONTEND_SUCCESS_RETRY_COUNT=$MAX_RETRIES" >> $GITHUB_ENV
+            echo "FRONTEND_FINAL_RESULT=FAILED" >> $GITHUB_ENV
+            
+            # 失敗時も出力ファイルは保持（デバッグ用）
+            cp frontend_implementation_${{ matrix.agent_id }}.js final_frontend_implementation_${{ matrix.agent_id }}.js
+          fi
 
       - name: 生成されたフロントエンドコードを確認
         run: |

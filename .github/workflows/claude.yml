@@ -5,13 +5,13 @@ on:
   workflow_dispatch:
     inputs:
       task_prompt:
-        description: 'Claude に実行させるタスクのプロンプト'
+        description: "Claude に実行させるタスクのプロンプト"
         required: true
-        default: 'FizzBuzzをPython関数 fizzbuzz(n: int) -> str で実装してください。仕様：3の倍数はFizz、5の倍数はBuzz、15の倍数はFizzBuzz、それ以外は数字の文字列を返す。'
+        default: "FizzBuzzをPython関数 fizzbuzz(n: int) -> str で実装してください。仕様：3の倍数はFizz、5の倍数はBuzz、15の倍数はFizzBuzz、それ以外は数字の文字列を返す。"
       programming_language:
-        description: 'プログラミング言語'
+        description: "プログラミング言語"
         required: true
-        default: 'python'
+        default: "python"
         type: choice
         options:
           - python
@@ -19,13 +19,13 @@ on:
           - go
           - java
       file_extension:
-        description: 'ファイル拡張子'
+        description: "ファイル拡張子"
         required: true
-        default: 'py'
+        default: "py"
       test_command:
-        description: 'テスト実行コマンド'
+        description: "テスト実行コマンド"
         required: false
-        default: 'python -m pytest'
+        default: "python -m pytest"
 
 jobs:
   generate-code:
@@ -44,16 +44,160 @@ jobs:
       - name: Claude バージョン確認
         run: claude --version
 
-      - name: Claude にコード生成させる（${{ matrix.agent_id }}）
+      - name: Claude にコード生成させる（リトライ機能付き）
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
           echo "▶ Claude に問い合わせます（Agent: ${{ matrix.agent_id }})"
-          PROMPT="${{ github.event.inputs.task_prompt || 'FizzBuzzをPython関数 fizzbuzz(n: int) -> str で実装してください。仕様：3の倍数はFizz、5の倍数はBuzz、15の倍数はFizzBuzz、それ以外は数字の文字列を返す。' }}"
+
+          # 基本プロンプト
+          BASE_PROMPT="${{ github.event.inputs.task_prompt || 'FizzBuzzをPython関数 fizzbuzz(n: int) -> str で実装してください。仕様：3の倍数はFizz、5の倍数はBuzz、15の倍数はFizzBuzz、それ以外は数字の文字列を返す。' }}"
           FILE_EXT="${{ github.event.inputs.file_extension || 'py' }}"
-          claude -p "$PROMPT" \
-          > output_${{ matrix.agent_id }}.$FILE_EXT \
-          || echo "Claude 実行に失敗しました"
+          LANG="${{ github.event.inputs.programming_language || 'python' }}"
+
+          # テストファイルを読み込み
+          if [ -f "tests/test_fizzbuzz.py" ]; then
+            TEST_CONTENT=$(cat tests/test_fizzbuzz.py)
+          else
+            TEST_CONTENT="基本的なテストケースを想定してください"
+          fi
+
+          # リトライ設定
+          MAX_RETRIES=5
+          RETRY_COUNT=0
+          SUCCESS=false
+
+          while [ $RETRY_COUNT -lt $MAX_RETRIES ] && [ "$SUCCESS" = false ]; do
+            echo "=== 実装試行 $((RETRY_COUNT + 1))/$MAX_RETRIES ==="
+            
+            if [ $RETRY_COUNT -eq 0 ]; then
+              # 初回：TDD指向の詳細プロンプト
+              ENHANCED_PROMPT="$BASE_PROMPT
+
+              重要: 以下のテストを100%通過するコードを生成してください。
+
+              テストファイル内容:
+              $TEST_CONTENT
+
+              要件:
+              1. すべてのテストケースを通過すること
+              2. エラーハンドリングを含むこと  
+              3. 型ヒントを使用すること
+              4. docstringを含むこと
+              5. エッジケース（0など）も考慮すること
+
+              プログラミング言語: $LANG
+              出力: 完全な実装ファイル（インポート文やコメントも含む）"
+            else
+              # リトライ時：前回のエラーを含めて改善を促す
+              ENHANCED_PROMPT="前回の実装でテストが失敗しました。以下のエラーを修正してください：
+
+              エラー内容:
+              $(cat test_result_${{ matrix.agent_id }}.txt 2>/dev/null || echo "テスト実行エラー")
+
+              元のタスク: $BASE_PROMPT
+
+              テストファイル内容:
+              $TEST_CONTENT
+
+              特に以下の点を改善してください：
+              - テストケースの要件を正確に満たす
+              - エッジケースの処理（0、負の数など）
+              - 型の整合性
+              - 関数名とシグネチャの正確性
+              - インポートエラーの解決
+
+              プログラミング言語: $LANG
+              出力: 修正された完全な実装ファイル"
+            fi
+            
+            # Claude実行
+            echo "Claude実行中..."
+            claude -p "$ENHANCED_PROMPT" > output_${{ matrix.agent_id }}.$FILE_EXT || {
+              echo "❌ Claude実行に失敗しました"
+              RETRY_COUNT=$((RETRY_COUNT + 1))
+              continue
+            }
+            
+            echo "生成されたコード:"
+            cat output_${{ matrix.agent_id }}.$FILE_EXT
+            
+            # テスト実行
+            echo "テスト実行中..."
+            if [ "$FILE_EXT" = "py" ]; then
+              # Pythonの場合
+              python -m pytest tests/test_fizzbuzz.py -v --tb=short > test_result_${{ matrix.agent_id }}.txt 2>&1
+              TEST_EXIT_CODE=$?
+            else
+              echo "プログラミング言語 $FILE_EXT のテストは未実装です" > test_result_${{ matrix.agent_id }}.txt
+              TEST_EXIT_CODE=1
+            fi
+            
+            echo "テスト結果:"
+            cat test_result_${{ matrix.agent_id }}.txt
+            
+            # テスト成功判定（より柔軟な判定）
+            SUCCESS_PATTERNS=("PASSED" "passed" "OK" "✓" "All tests passed" "test session starts")
+            FAILURE_PATTERNS=("FAILED" "failed" "ERROR" "error" "FAIL" "ImportError" "ModuleNotFoundError")
+            
+            TEST_SUCCESS=false
+            
+            # 成功パターンをチェック
+            for pattern in "${SUCCESS_PATTERNS[@]}"; do
+              if grep -q "$pattern" test_result_${{ matrix.agent_id }}.txt; then
+                TEST_SUCCESS=true
+                break
+              fi
+            done
+            
+            # 失敗パターンをチェック（成功判定を上書き）
+            for pattern in "${FAILURE_PATTERNS[@]}"; do
+              if grep -q "$pattern" test_result_${{ matrix.agent_id }}.txt; then
+                TEST_SUCCESS=false
+                break
+              fi
+            done
+            
+            # 追加の成功判定：テスト実行が正常終了し、失敗がない場合
+            if [ $TEST_EXIT_CODE -eq 0 ] && ! grep -q "FAILED\|failed\|ERROR\|error" test_result_${{ matrix.agent_id }}.txt; then
+              TEST_SUCCESS=true
+            fi
+            
+            if [ "$TEST_SUCCESS" = true ]; then
+              echo "✅ テスト成功！実装を採用します"
+              SUCCESS=true
+              
+              # 成功した実装を最終ファイルとして保存
+              cp output_${{ matrix.agent_id }}.$FILE_EXT final_implementation_${{ matrix.agent_id }}.$FILE_EXT
+              
+              # 成功メトリクスを記録
+              echo "SUCCESS_RETRY_COUNT=$RETRY_COUNT" >> $GITHUB_ENV
+              echo "FINAL_TEST_RESULT=PASSED" >> $GITHUB_ENV
+              
+            else
+              echo "❌ テスト失敗。リトライします..."
+              RETRY_COUNT=$((RETRY_COUNT + 1))
+              
+              # デバッグ情報を追加
+              echo "デバッグ情報:"
+              echo "- テスト終了コード: $TEST_EXIT_CODE"
+              echo "- 生成ファイルサイズ: $(wc -l < output_${{ matrix.agent_id }}.$FILE_EXT) 行"
+              echo "- テスト結果ファイルサイズ: $(wc -l < test_result_${{ matrix.agent_id }}.txt) 行"
+            fi
+          done
+
+          if [ "$SUCCESS" = false ]; then
+            echo "❌ $MAX_RETRIES 回の試行後もテストに成功しませんでした"
+            echo "最後のエラー:"
+            cat test_result_${{ matrix.agent_id }}.txt
+            
+            # 失敗メトリクスを記録
+            echo "SUCCESS_RETRY_COUNT=$MAX_RETRIES" >> $GITHUB_ENV
+            echo "FINAL_TEST_RESULT=FAILED" >> $GITHUB_ENV
+            
+            # 失敗時も出力ファイルは保持（デバッグ用）
+            cp output_${{ matrix.agent_id }}.$FILE_EXT final_implementation_${{ matrix.agent_id }}.$FILE_EXT
+          fi
 
       - name: Claude 出力確認
         run: |
@@ -69,7 +213,7 @@ jobs:
       - name: Python環境をセットアップ
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.11"
 
       - name: pytest をインストール
         run: pip install pytest
@@ -78,14 +222,14 @@ jobs:
         run: |
           FILE_EXT="${{ github.event.inputs.file_extension || 'py' }}"
           TEST_CMD="${{ github.event.inputs.test_command || 'python -m pytest' }}"
-          
+
           # テストファイルを各エージェントのモジュールディレクトリにコピー
           if [ -d "tests" ]; then
             cp -r tests/* modules/${{ matrix.agent_id }}/
           fi
-          
+
           cd modules/${{ matrix.agent_id }}
-          
+
           # テストを実行し、結果を保存
           if [ "$FILE_EXT" = "py" ]; then
             $TEST_CMD -v > test_result.txt 2>&1 || echo "テストが失敗しました"
@@ -120,7 +264,7 @@ jobs:
           echo "=== エージェント結果比較 ===" > comparison_report.txt
           echo "生成日時: $(date)" >> comparison_report.txt
           echo "" >> comparison_report.txt
-          
+
           # テスト成功したエージェントを特定
           SUCCESSFUL_AGENTS=""
           for agent in agent-a agent-b; do
@@ -151,7 +295,7 @@ jobs:
             fi
             echo "" >> comparison_report.txt
           done
-          
+
           # 成功したエージェントを環境変数に保存
           echo "SUCCESSFUL_AGENTS=$SUCCESSFUL_AGENTS" >> $GITHUB_ENV
 
@@ -196,7 +340,7 @@ jobs:
               fi
             fi
           done
-          
+
           if [ -n "$SELECTED_AGENT" ]; then
             echo "選択されたエージェント: $SELECTED_AGENT"
             
@@ -229,9 +373,9 @@ jobs:
           Task: ${{ github.event.inputs.task_prompt || 'FizzBuzz implementation' }}
           Language: ${{ github.event.inputs.programming_language || 'python' }}
           Selected Agent: $SELECTED_AGENT
-          
+
           🤖 Generated with Claude Code via GitHub Actions
-          
+
           Co-Authored-By: Claude <noreply@anthropic.com>"
 
       - name: ブランチをプッシュ
@@ -243,41 +387,41 @@ jobs:
         run: |
           TASK_SUMMARY="${{ github.event.inputs.task_prompt || 'FizzBuzz implementation' }}"
           LANGUAGE="${{ github.event.inputs.programming_language || 'python' }}"
-          
+
           gh pr create --title "🤖 Claude実装: $TASK_SUMMARY" --body "$(cat <<'EOF'
           ## 📋 実装概要
-          
+
           **タスク**: $TASK_SUMMARY
           **言語**: $LANGUAGE
           **選択エージェント**: $SELECTED_AGENT
-          
+
           ## 🔍 生成された実装
-          
+
           Claude が並列実行で生成した実装のうち、テストに成功した実装を選択しました。
-          
+
           ## 📊 分析レポート
-          
+
           詳細な比較分析は `claude_analysis_report.txt` を参照してください。
-          
+
           ## ✅ レビューポイント
-          
+
           - [ ] 実装がタスク要件を満たしているか確認
           - [ ] コードの品質・可読性をチェック
           - [ ] セキュリティ上の問題がないか確認
           - [ ] 既存コードベースとの整合性を確認
           - [ ] テストケースの妥当性を確認
-          
+
           ## 🔧 次のステップ
-          
+
           1. コードレビューを実施
           2. 必要に応じて修正
           3. 追加テストの実行
           4. マージ判断
-          
+
           ---
-          
+
           🤖 **自動生成**: このPRはGitHub Actions + Claude Code によって自動生成されました
-          
+
           **Co-Authored-By**: Claude <noreply@anthropic.com>
           EOF
           )"
