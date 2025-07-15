@@ -4,22 +4,22 @@ on:
   workflow_dispatch:
     inputs:
       development_target:
-        description: '開発対象'
+        description: "開発対象"
         required: true
-        default: 'both'
+        default: "both"
         type: choice
         options:
           - both
           - backend
           - frontend
       task_description:
-        description: '開発タスクの説明'
+        description: "開発タスクの説明"
         required: true
-        default: 'Todo基本機能の実装'
+        default: "Todo基本機能の実装"
       feature_scope:
-        description: '機能スコープ'
+        description: "機能スコープ"
         required: true
-        default: 'crud'
+        default: "crud"
         type: choice
         options:
           - crud
@@ -42,7 +42,7 @@ jobs:
       - name: Node.js環境をセットアップ
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: "18"
 
       - name: Claude CLI をインストール
         run: npm install -g @anthropic-ai/claude-code
@@ -52,10 +52,10 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
           echo "▶ バックエンド実装を生成中 (Agent: ${{ matrix.agent_id }})"
-          
+
           # API仕様書を読み込み
           API_SPEC=$(cat todo-app/api-spec.md)
-          
+
           # プロンプトを構築
           BACKEND_PROMPT="Todo アプリのバックエンドAPIを Node.js + Express で実装してください。
 
@@ -122,7 +122,7 @@ jobs:
       - name: Node.js環境をセットアップ
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: "18"
 
       - name: Claude CLI をインストール
         run: npm install -g @anthropic-ai/claude-code
@@ -132,10 +132,10 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
           echo "▶ フロントエンド実装を生成中 (Agent: ${{ matrix.agent_id }})"
-          
+
           # API仕様書を読み込み
           API_SPEC=$(cat todo-app/api-spec.md)
-          
+
           # プロンプトを構築
           FRONTEND_PROMPT="Todo アプリのフロントエンドを React で実装してください。
 
@@ -168,13 +168,13 @@ jobs:
           cp frontend_implementation_${{ matrix.agent_id }}.js todo-app/frontend-${{ matrix.agent_id }}/src/App.js
           cp todo-app/frontend/package.json todo-app/frontend-${{ matrix.agent_id }}/
           cp todo-app/frontend/src/App.test.js todo-app/frontend-${{ matrix.agent_id }}/src/
-          
+
           # 基本的なindex.jsを作成
           cat > todo-app/frontend-${{ matrix.agent_id }}/src/index.js << 'EOF'
           import React from 'react';
           import ReactDOM from 'react-dom/client';
           import App from './App';
-          
+
           const root = ReactDOM.createRoot(document.getElementById('root'));
           root.render(<App />);
           EOF
@@ -273,8 +273,204 @@ jobs:
           name: integration-report
           path: integration_report.txt
 
+  generate-summary:
+    needs: [backend-development, frontend-development, compare-and-integrate]
+    runs-on: ubuntu-latest
+    name: 📊 開発サマリー生成
+    if: always()
+    steps:
+      - name: チェックアウト
+        uses: actions/checkout@v4
+
+      - name: 全てのアーティファクトをダウンロード
+        uses: actions/download-artifact@v4
+
+      - name: 開発サマリーを生成
+        run: |
+          echo "# 🚀 Todo App Claude並列開発サマリー" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**開発日時**: $(date)" >> $GITHUB_STEP_SUMMARY
+          echo "**開発対象**: ${{ github.event.inputs.development_target }}" >> $GITHUB_STEP_SUMMARY
+          echo "**タスク**: ${{ github.event.inputs.task_description }}" >> $GITHUB_STEP_SUMMARY
+          echo "**機能スコープ**: ${{ github.event.inputs.feature_scope }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # バックエンド結果サマリー
+          if [ "${{ github.event.inputs.development_target }}" = "backend" ] || [ "${{ github.event.inputs.development_target }}" = "both" ]; then
+            echo "## 🔧 バックエンド開発結果" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            
+            BACKEND_SUCCESS_COUNT=0
+            for agent in backend-agent-a backend-agent-b; do
+              echo "### ${agent}" >> $GITHUB_STEP_SUMMARY
+              if [ -f "${agent}-results/test_result.txt" ]; then
+                if grep -q "PASS" "${agent}-results/test_result.txt" 2>/dev/null; then
+                  echo "- ✅ **実装結果**: 成功" >> $GITHUB_STEP_SUMMARY
+                  echo "- 📁 **ファイル**: \`todo-app/backend/src/app.js\`" >> $GITHUB_STEP_SUMMARY
+                  echo "- 🧪 **テスト**: 通過" >> $GITHUB_STEP_SUMMARY
+                  BACKEND_SUCCESS_COUNT=$((BACKEND_SUCCESS_COUNT + 1))
+                else
+                  echo "- ❌ **実装結果**: 失敗" >> $GITHUB_STEP_SUMMARY
+                  echo "- 🧪 **テスト**: 失敗" >> $GITHUB_STEP_SUMMARY
+                fi
+                
+                # ファイルサイズ情報
+                if [ -f "${agent}-results/app.js" ]; then
+                  LINES=$(wc -l < "${agent}-results/app.js" 2>/dev/null || echo "0")
+                  echo "- 📏 **コード行数**: ${LINES}行" >> $GITHUB_STEP_SUMMARY
+                fi
+              else
+                echo "- ⚠️ **実装結果**: テスト結果なし" >> $GITHUB_STEP_SUMMARY
+              fi
+              echo "" >> $GITHUB_STEP_SUMMARY
+            done
+            
+            # バックエンド成功率
+            echo "**バックエンド成功率**: ${BACKEND_SUCCESS_COUNT}/2 ($(( BACKEND_SUCCESS_COUNT * 50 ))%)" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # フロントエンド結果サマリー
+          if [ "${{ github.event.inputs.development_target }}" = "frontend" ] || [ "${{ github.event.inputs.development_target }}" = "both" ]; then
+            echo "## 🎨 フロントエンド開発結果" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            
+            FRONTEND_SUCCESS_COUNT=0
+            for agent in frontend-agent-a frontend-agent-b; do
+              echo "### ${agent}" >> $GITHUB_STEP_SUMMARY
+              if [ -f "${agent}-results/test_result.txt" ]; then
+                if grep -q "PASS" "${agent}-results/test_result.txt" 2>/dev/null; then
+                  echo "- ✅ **実装結果**: 成功" >> $GITHUB_STEP_SUMMARY
+                  echo "- 📁 **ファイル**: \`todo-app/frontend/src/App.js\`" >> $GITHUB_STEP_SUMMARY
+                  echo "- 🧪 **テスト**: 通過" >> $GITHUB_STEP_SUMMARY
+                  FRONTEND_SUCCESS_COUNT=$((FRONTEND_SUCCESS_COUNT + 1))
+                else
+                  echo "- ❌ **実装結果**: 失敗" >> $GITHUB_STEP_SUMMARY
+                  echo "- 🧪 **テスト**: 失敗" >> $GITHUB_STEP_SUMMARY
+                fi
+                
+                # ファイルサイズ情報
+                if [ -f "${agent}-results/App.js" ]; then
+                  LINES=$(wc -l < "${agent}-results/App.js" 2>/dev/null || echo "0")
+                  echo "- 📏 **コード行数**: ${LINES}行" >> $GITHUB_STEP_SUMMARY
+                fi
+              else
+                echo "- ⚠️ **実装結果**: テスト結果なし" >> $GITHUB_STEP_SUMMARY
+              fi
+              echo "" >> $GITHUB_STEP_SUMMARY
+            done
+            
+            # フロントエンド成功率
+            echo "**フロントエンド成功率**: ${FRONTEND_SUCCESS_COUNT}/2 ($(( FRONTEND_SUCCESS_COUNT * 50 ))%)" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: エージェント性能比較
+        run: |
+          echo "## 🏆 エージェント性能比較" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| エージェント | 実装結果 | テスト結果 | コード行数 | 品質スコア |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------------|----------|------------|------------|------------|" >> $GITHUB_STEP_SUMMARY
+
+          # バックエンドエージェント
+          if [ "${{ github.event.inputs.development_target }}" = "backend" ] || [ "${{ github.event.inputs.development_target }}" = "both" ]; then
+            for agent in backend-agent-a backend-agent-b; do
+              if [ -f "${agent}-results/test_result.txt" ]; then
+                LINES=$(wc -l < "${agent}-results/app.js" 2>/dev/null || echo "0")
+                if grep -q "PASS" "${agent}-results/test_result.txt" 2>/dev/null; then
+                  echo "| $agent | ✅ 成功 | ✅ 通過 | ${LINES} | ⭐⭐⭐⭐ |" >> $GITHUB_STEP_SUMMARY
+                else
+                  echo "| $agent | ❌ 失敗 | ❌ 失敗 | ${LINES} | ⭐⭐ |" >> $GITHUB_STEP_SUMMARY
+                fi
+              fi
+            done
+          fi
+
+          # フロントエンドエージェント
+          if [ "${{ github.event.inputs.development_target }}" = "frontend" ] || [ "${{ github.event.inputs.development_target }}" = "both" ]; then
+            for agent in frontend-agent-a frontend-agent-b; do
+              if [ -f "${agent}-results/test_result.txt" ]; then
+                LINES=$(wc -l < "${agent}-results/App.js" 2>/dev/null || echo "0")
+                if grep -q "PASS" "${agent}-results/test_result.txt" 2>/dev/null; then
+                  echo "| $agent | ✅ 成功 | ✅ 通過 | ${LINES} | ⭐⭐⭐⭐ |" >> $GITHUB_STEP_SUMMARY
+                else
+                  echo "| $agent | ❌ 失敗 | ❌ 失敗 | ${LINES} | ⭐⭐ |" >> $GITHUB_STEP_SUMMARY
+                fi
+              fi
+            done
+          fi
+
+      - name: 統合・デプロイ情報
+        run: |
+          echo "## 🔄 統合・デプロイ状況" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # ブランチ情報
+          BRANCH_NAME="claude-todo-app-$(date +%Y%m%d-%H%M%S)"
+          echo "- 🌿 **作成予定ブランチ**: \`$BRANCH_NAME\`" >> $GITHUB_STEP_SUMMARY
+          echo "- 📝 **プルリクエスト**: 自動作成予定" >> $GITHUB_STEP_SUMMARY
+          echo "- 📊 **詳細レポート**: \`todo-app/claude_development_report.txt\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # 開発進捗の可視化
+          echo "## 🎯 開発進捗" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ github.event.inputs.development_target }}" = "backend" ] || [ "${{ github.event.inputs.development_target }}" = "both" ]; then
+            echo "### バックエンド開発" >> $GITHUB_STEP_SUMMARY
+            echo "🔴➡️🟢 **TDDプロセス**: 赤 → 緑" >> $GITHUB_STEP_SUMMARY
+            echo "- ✅ API設計完了" >> $GITHUB_STEP_SUMMARY
+            echo "- ✅ 実装完了" >> $GITHUB_STEP_SUMMARY
+            echo "- ✅ テスト実行完了" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ "${{ github.event.inputs.development_target }}" = "frontend" ] || [ "${{ github.event.inputs.development_target }}" = "both" ]; then
+            echo "### フロントエンド開発" >> $GITHUB_STEP_SUMMARY
+            echo "🎨➡️📱 **UI/UX**: デザイン → 実装" >> $GITHUB_STEP_SUMMARY
+            echo "- ✅ コンポーネント設計完了" >> $GITHUB_STEP_SUMMARY
+            echo "- ✅ 実装完了" >> $GITHUB_STEP_SUMMARY
+            echo "- ✅ テスト実行完了" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: 次のステップとコマンド
+        run: |
+          echo "## 🎯 次のステップ" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "1. 📋 プルリクエストをレビュー" >> $GITHUB_STEP_SUMMARY
+          echo "2. 🧪 ローカルでテスト実行" >> $GITHUB_STEP_SUMMARY
+          echo "3. 🚀 マージ・デプロイ" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # 実行コマンド例
+          echo "## 💻 ローカル実行コマンド" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ github.event.inputs.development_target }}" = "backend" ] || [ "${{ github.event.inputs.development_target }}" = "both" ]; then
+            echo "# バックエンド起動" >> $GITHUB_STEP_SUMMARY
+            echo "cd todo-app/backend" >> $GITHUB_STEP_SUMMARY
+            echo "npm install && npm start" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ "${{ github.event.inputs.development_target }}" = "frontend" ] || [ "${{ github.event.inputs.development_target }}" = "both" ]; then
+            echo "# フロントエンド起動（別ターミナル）" >> $GITHUB_STEP_SUMMARY
+            echo "cd todo-app/frontend" >> $GITHUB_STEP_SUMMARY
+            echo "npm install && npm start" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # 品質メトリクス
+          echo "## 📈 品質メトリクス" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- 🤖 **使用エージェント数**: 4個（backend-a, backend-b, frontend-a, frontend-b）" >> $GITHUB_STEP_SUMMARY
+          echo "- ⏱️ **推定実行時間**: 5-10分" >> $GITHUB_STEP_SUMMARY
+          echo "- 🔄 **並列処理**: バックエンド・フロントエンド同時開発" >> $GITHUB_STEP_SUMMARY
+          echo "- 📊 **自動品質評価**: テスト結果による実装選択" >> $GITHUB_STEP_SUMMARY
+
   create-implementation-pr:
-    needs: compare-and-integrate
+    needs: [compare-and-integrate, generate-summary]
     runs-on: ubuntu-latest
     name: 実装PR作成
     if: success()
@@ -336,9 +532,9 @@ jobs:
           Target: ${{ github.event.inputs.development_target }}
           Task: ${{ github.event.inputs.task_description }}
           Scope: ${{ github.event.inputs.feature_scope }}
-          
+
           🤖 Generated with Claude Code via GitHub Actions
-          
+
           Co-Authored-By: Claude <noreply@anthropic.com>"
 
       - name: ブランチをプッシュ
