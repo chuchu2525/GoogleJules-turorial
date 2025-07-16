@@ -162,12 +162,38 @@ jobs:
             echo "抽出されたコード:"
             cat output_${{ matrix.agent_id }}.$FILE_EXT
             
+            # テスト実行の準備
+            echo "テスト実行の準備中..."
+            
+            # 生成されたファイルをテスト用にコピー
+            cp output_${{ matrix.agent_id }}.$FILE_EXT output_${{ matrix.agent_id }}.py 2>/dev/null || true
+            
+            # デバッグ情報
+            echo "現在のディレクトリ内容:"
+            ls -la output_* 2>/dev/null || echo "output_* ファイルが見つかりません"
+            
             # テスト実行
             echo "テスト実行中..."
             if [ "$FILE_EXT" = "py" ]; then
-              # Pythonの場合
-              python -m pytest tests/test_fizzbuzz.py -v --tb=short > test_result_${{ matrix.agent_id }}.txt 2>&1
+              # Pythonの場合 - 簡潔なテスト実行
+              echo "=== 詳細テスト実行 ===" > test_result_${{ matrix.agent_id }}.txt
+              echo "実行時刻: $(date)" >> test_result_${{ matrix.agent_id }}.txt
+              echo "" >> test_result_${{ matrix.agent_id }}.txt
+              
+              # 基本的なインポートテスト
+              echo "=== インポートテスト ===" >> test_result_${{ matrix.agent_id }}.txt
+              python -c "import sys; sys.path.insert(0, '.'); import output_${{ matrix.agent_id }}; print('インポート成功'); print('fizzbuzz(15):', output_${{ matrix.agent_id }}.fizzbuzz(15))" >> test_result_${{ matrix.agent_id }}.txt 2>&1 || echo "インポートエラー" >> test_result_${{ matrix.agent_id }}.txt
+              
+              echo "" >> test_result_${{ matrix.agent_id }}.txt
+              echo "=== pytest実行 ===" >> test_result_${{ matrix.agent_id }}.txt
+              
+              # pytest実行
+              python -m pytest tests/test_fizzbuzz.py -v --tb=short >> test_result_${{ matrix.agent_id }}.txt 2>&1
               TEST_EXIT_CODE=$?
+              
+              echo "" >> test_result_${{ matrix.agent_id }}.txt
+              echo "=== テスト終了コード: $TEST_EXIT_CODE ===" >> test_result_${{ matrix.agent_id }}.txt
+              
             else
               echo "プログラミング言語 $FILE_EXT のテストは未実装です" > test_result_${{ matrix.agent_id }}.txt
               TEST_EXIT_CODE=1
