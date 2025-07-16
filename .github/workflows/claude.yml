@@ -165,30 +165,34 @@ jobs:
             # テスト実行の準備
             echo "テスト実行の準備中..."
             
-            # 生成されたファイルをテスト用にコピー
+            # 生成されたファイルを適切な場所にコピー
             cp output_${{ matrix.agent_id }}.$FILE_EXT output_${{ matrix.agent_id }}.py 2>/dev/null || true
             
             # デバッグ情報
             echo "現在のディレクトリ内容:"
             ls -la output_* 2>/dev/null || echo "output_* ファイルが見つかりません"
+            echo "生成されたファイルの内容確認:"
+            head -10 output_${{ matrix.agent_id }}.py
             
             # テスト実行
             echo "テスト実行中..."
             if [ "$FILE_EXT" = "py" ]; then
-              # Pythonの場合 - 簡潔なテスト実行
+              # Pythonの場合 - 改善されたテスト実行
               echo "=== 詳細テスト実行 ===" > test_result_${{ matrix.agent_id }}.txt
               echo "実行時刻: $(date)" >> test_result_${{ matrix.agent_id }}.txt
               echo "" >> test_result_${{ matrix.agent_id }}.txt
               
-              # 基本的なインポートテスト
+              # 基本的なインポートテスト（簡潔版）
               echo "=== インポートテスト ===" >> test_result_${{ matrix.agent_id }}.txt
+              
+              # 単純なインポートテスト
               python -c "import sys; sys.path.insert(0, '.'); import output_${{ matrix.agent_id }}; print('インポート成功'); print('fizzbuzz(15):', output_${{ matrix.agent_id }}.fizzbuzz(15))" >> test_result_${{ matrix.agent_id }}.txt 2>&1 || echo "インポートエラー" >> test_result_${{ matrix.agent_id }}.txt
               
               echo "" >> test_result_${{ matrix.agent_id }}.txt
               echo "=== pytest実行 ===" >> test_result_${{ matrix.agent_id }}.txt
               
-              # pytest実行
-              python -m pytest tests/test_fizzbuzz.py -v --tb=short >> test_result_${{ matrix.agent_id }}.txt 2>&1
+              # pytest実行（環境変数でPythonパスを設定）
+              PYTHONPATH=. python -m pytest tests/test_fizzbuzz.py -v --tb=short --no-header >> test_result_${{ matrix.agent_id }}.txt 2>&1
               TEST_EXIT_CODE=$?
               
               echo "" >> test_result_${{ matrix.agent_id }}.txt

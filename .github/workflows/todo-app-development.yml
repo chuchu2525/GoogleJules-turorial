@@ -334,17 +334,34 @@ jobs:
             head -20 frontend_raw_output_${{ matrix.agent_id }}.txt
             echo "..."
             
-            # MarkdownコードブロックからピュアなJavaScriptを抽出
+            # MarkdownコードブロックからピュアなJavaScriptを抽出（改善版）
             echo "JavaScriptコードを抽出中..."
+            
+            # 複数のパターンでコードブロックを検索・抽出
             if grep -q '```javascript' frontend_raw_output_${{ matrix.agent_id }}.txt; then
-              # Markdownコードブロックから抽出
+              echo "```javascript コードブロックを検出"
               sed -n '/```javascript/,/```/p' frontend_raw_output_${{ matrix.agent_id }}.txt | sed '1d;$d' > frontend_implementation_${{ matrix.agent_id }}.js
             elif grep -q '```jsx' frontend_raw_output_${{ matrix.agent_id }}.txt; then
-              # JSXコードブロックから抽出
+              echo "```jsx コードブロックを検出"
               sed -n '/```jsx/,/```/p' frontend_raw_output_${{ matrix.agent_id }}.txt | sed '1d;$d' > frontend_implementation_${{ matrix.agent_id }}.js
+            elif grep -q '```js' frontend_raw_output_${{ matrix.agent_id }}.txt; then
+              echo "```js コードブロックを検出"
+              sed -n '/```js/,/```/p' frontend_raw_output_${{ matrix.agent_id }}.txt | sed '1d;$d' > frontend_implementation_${{ matrix.agent_id }}.js
+            elif grep -q '```' frontend_raw_output_${{ matrix.agent_id }}.txt; then
+              echo "汎用コードブロックを検出"
+              sed -n '/```/,/```/p' frontend_raw_output_${{ matrix.agent_id }}.txt | sed '1d;$d' > frontend_implementation_${{ matrix.agent_id }}.js
             else
-              # コードブロックがない場合はそのまま使用
+              echo "コードブロックなし - 生出力をそのまま使用"
               cp frontend_raw_output_${{ matrix.agent_id }}.txt frontend_implementation_${{ matrix.agent_id }}.js
+            fi
+            
+            # 説明文の除去（先頭の説明文を削除）
+            if grep -q "以下が.*ファイルの内容です" frontend_implementation_${{ matrix.agent_id }}.js; then
+              echo "説明文を検出 - 除去中"
+              # 説明文の行を削除
+              sed -i '/以下が.*ファイルの内容です/d' frontend_implementation_${{ matrix.agent_id }}.js
+              sed -i '/を使用した.*の完全な実装/d' frontend_implementation_${{ matrix.agent_id }}.js
+              sed -i '/^Node\.js + Express/d' frontend_implementation_${{ matrix.agent_id }}.js
             fi
             
             # ファイルサイズチェック
