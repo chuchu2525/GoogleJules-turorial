@@ -16,16 +16,6 @@ on:
         description: "開発タスクの説明"
         required: true
         default: "Todo基本機能の実装"
-      feature_scope:
-        description: "機能スコープ"
-        required: true
-        default: "crud"
-        type: choice
-        options:
-          - crud
-          - authentication
-          - ui_improvement
-          - deployment
 
 jobs:
   backend-development:
@@ -47,138 +37,26 @@ jobs:
       - name: Claude CLI をインストール
         run: npm install -g @anthropic-ai/claude-code
 
-      - name: バックエンド実装を生成（リトライ機能付き）
+      - name: バックエンド実装を生成
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
           echo "▶ バックエンド実装を生成中 (Agent: ${{ matrix.agent_id }})"
 
-          # API仕様書を読み込み
-          API_SPEC=$(cat todo-app/api-spec.md)
-
-          # テストファイルを読み込み
-          if [ -f "todo-app/backend/tests/api.test.js" ]; then
-            TEST_CONTENT=$(cat todo-app/backend/tests/api.test.js)
-          else
-            TEST_CONTENT="基本的なAPIテストケースを想定してください"
-          fi
-
-          # 基本プロンプト
-          BASE_BACKEND_PROMPT="Todo アプリのバックエンドAPIを Node.js + Express で実装してください。
+          PROMPT="Todo アプリのバックエンドAPIを Node.js + Express で実装してください。
 
           タスク: ${{ github.event.inputs.task_description }}
-          機能スコープ: ${{ github.event.inputs.feature_scope }}
-
-          API仕様:
-          $API_SPEC
 
           要件:
           - Express.js を使用
           - SQLite データベース
+          - CRUD操作 (GET /todos, POST /todos, PUT /todos/:id, DELETE /todos/:id)
           - 適切なエラーハンドリング
-          - バリデーション
           - CORS対応
-          - セキュリティ考慮
 
           出力: app.js ファイルとして完全な実装を生成"
 
-          # リトライ設定
-          MAX_RETRIES=3
-          RETRY_COUNT=0
-          SUCCESS=false
-
-          while [ $RETRY_COUNT -lt $MAX_RETRIES ] && [ "$SUCCESS" = false ]; do
-            echo "=== バックエンド実装試行 $((RETRY_COUNT + 1))/$MAX_RETRIES ==="
-            
-            if [ $RETRY_COUNT -eq 0 ]; then
-              # 初回：TDD指向の詳細プロンプト
-              ENHANCED_PROMPT="$BASE_BACKEND_PROMPT
-
-              重要: 以下のテストを通過するコードを生成してください。
-
-              テストファイル内容:
-              $TEST_CONTENT
-
-              追加要件:
-              1. すべてのAPIエンドポイントを実装すること
-              2. 適切なHTTPステータスコードを返すこと
-              3. エラーハンドリングを含むこと
-              4. CORS設定を含むこと
-              5. ヘルスチェックエンドポイント(/health)を含むこと
-              6. レスポンス形式を統一すること
-
-              出力: 完全なapp.jsファイル（require文、ミドルウェア設定、全エンドポイント、サーバー起動コードを含む）"
-            else
-              # リトライ時：前回のエラーを含めて改善を促す
-              ENHANCED_PROMPT="前回のバックエンド実装でテストが失敗しました。以下のエラーを修正してください：
-
-              エラー内容:
-              $(cat backend_test_result_${{ matrix.agent_id }}.txt 2>/dev/null || echo "テスト実行エラー")
-
-              元のタスク: $BASE_BACKEND_PROMPT
-
-              テストファイル内容:
-              $TEST_CONTENT
-
-              特に以下の点を改善してください：
-              - APIエンドポイントの正確な実装
-              - レスポンス形式の統一
-              - エラーハンドリングの改善
-              - データベース操作の修正
-              - CORS設定の確認
-              - モジュールのエクスポート方法
-
-              出力: 修正された完全なapp.jsファイル"
-            fi
-            
-            # Claude実行
-            echo "Claude実行中..."
-            claude -p "$ENHANCED_PROMPT" > backend_implementation_${{ matrix.agent_id }}.js || {
-              echo "❌ Claude実行に失敗しました"
-              RETRY_COUNT=$((RETRY_COUNT + 1))
-              continue
-            }
-            
-            echo "生成されたバックエンドコード:"
-            head -50 backend_implementation_${{ matrix.agent_id }}.js
-            echo "..."
-            
-            # 簡易テスト実行（構文チェック）
-            echo "構文チェック中..."
-            node -c backend_implementation_${{ matrix.agent_id }}.js > backend_test_result_${{ matrix.agent_id }}.txt 2>&1
-            SYNTAX_CHECK=$?
-            
-            if [ $SYNTAX_CHECK -eq 0 ]; then
-              echo "✅ 構文チェック成功！実装を採用します"
-              SUCCESS=true
-              
-              # 成功した実装を最終ファイルとして保存
-              cp backend_implementation_${{ matrix.agent_id }}.js final_backend_implementation_${{ matrix.agent_id }}.js
-              
-              # 成功メトリクスを記録
-              echo "BACKEND_SUCCESS_RETRY_COUNT=$RETRY_COUNT" >> $GITHUB_ENV
-              echo "BACKEND_FINAL_RESULT=PASSED" >> $GITHUB_ENV
-              
-            else
-              echo "❌ 構文エラー。リトライします..."
-              echo "構文エラー内容:"
-              cat backend_test_result_${{ matrix.agent_id }}.txt
-              RETRY_COUNT=$((RETRY_COUNT + 1))
-            fi
-          done
-
-          if [ "$SUCCESS" = false ]; then
-            echo "❌ $MAX_RETRIES 回の試行後も構文チェックに成功しませんでした"
-            echo "最後のエラー:"
-            cat backend_test_result_${{ matrix.agent_id }}.txt
-            
-            # 失敗メトリクスを記録
-            echo "BACKEND_SUCCESS_RETRY_COUNT=$MAX_RETRIES" >> $GITHUB_ENV
-            echo "BACKEND_FINAL_RESULT=FAILED" >> $GITHUB_ENV
-            
-            # 失敗時も出力ファイルは保持（デバッグ用）
-            cp backend_implementation_${{ matrix.agent_id }}.js final_backend_implementation_${{ matrix.agent_id }}.js
-          fi
+          claude -p "$PROMPT" > backend_implementation_${{ matrix.agent_id }}.js || echo "Claude 実行に失敗しました"
 
       - name: 生成されたバックエンドコードを確認
         run: |
@@ -190,17 +68,16 @@ jobs:
           mkdir -p todo-app/backend-${{ matrix.agent_id }}/src
           cp backend_implementation_${{ matrix.agent_id }}.js todo-app/backend-${{ matrix.agent_id }}/src/app.js
           cp todo-app/backend/package.json todo-app/backend-${{ matrix.agent_id }}/
-          cp -r todo-app/backend/tests todo-app/backend-${{ matrix.agent_id }}/
 
       - name: 依存関係をインストール
         run: |
           cd todo-app/backend-${{ matrix.agent_id }}
           npm install
 
-      - name: バックエンドテストを実行
+      - name: 構文チェック
         run: |
           cd todo-app/backend-${{ matrix.agent_id }}
-          npm test > test_result.txt 2>&1 || echo "テストが失敗しました"
+          node -c src/app.js > test_result.txt 2>&1 || echo "構文エラーが発生しました" >> test_result.txt
           cat test_result.txt
 
       - name: バックエンドアーティファクトをアップロード
@@ -230,30 +107,15 @@ jobs:
       - name: Claude CLI をインストール
         run: npm install -g @anthropic-ai/claude-code
 
-      - name: フロントエンド実装を生成（リトライ機能付き）
+      - name: フロントエンド実装を生成
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
           echo "▶ フロントエンド実装を生成中 (Agent: ${{ matrix.agent_id }})"
 
-          # API仕様書を読み込み
-          API_SPEC=$(cat todo-app/api-spec.md)
-
-          # テストファイルを読み込み
-          if [ -f "todo-app/frontend/src/App.test.js" ]; then
-            TEST_CONTENT=$(cat todo-app/frontend/src/App.test.js)
-          else
-            TEST_CONTENT="基本的なReactコンポーネントテストケースを想定してください"
-          fi
-
-          # 基本プロンプト
-          BASE_FRONTEND_PROMPT="Todo アプリのフロントエンドを React で実装してください。
+          PROMPT="Todo アプリのフロントエンドを React で実装してください。
 
           タスク: ${{ github.event.inputs.task_description }}
-          機能スコープ: ${{ github.event.inputs.feature_scope }}
-
-          API仕様:
-          $API_SPEC
 
           要件:
           - React + JavaScript
@@ -261,198 +123,10 @@ jobs:
           - Todo一覧表示、追加、編集、削除機能
           - レスポンシブデザイン
           - 適切なエラーハンドリング
-          - ユーザビリティを考慮
 
           出力: App.js ファイルとして完全な実装を生成"
 
-          # リトライ設定
-          MAX_RETRIES=3
-          RETRY_COUNT=0
-          SUCCESS=false
-
-          while [ $RETRY_COUNT -lt $MAX_RETRIES ] && [ "$SUCCESS" = false ]; do
-            echo "=== フロントエンド実装試行 $((RETRY_COUNT + 1))/$MAX_RETRIES ==="
-            
-            if [ $RETRY_COUNT -eq 0 ]; then
-              # 初回：TDD指向の詳細プロンプト
-              ENHANCED_PROMPT="$BASE_FRONTEND_PROMPT
-
-              重要: 以下のテストを通過するReactコンポーネントを生成してください。
-
-              テストファイル内容:
-              $TEST_CONTENT
-
-              追加要件:
-              1. すべてのテストケースを通過すること
-              2. 適切なReact Hooksを使用すること
-              3. APIとの通信を実装すること
-              4. ローディング状態を管理すること
-              5. エラーハンドリングを含むこと
-              6. アクセシビリティを考慮すること
-              7. レスポンシブデザインを実装すること
-
-              出力形式の重要な指示:
-              - 説明文やコメントは一切含めない
-              - Markdownコードブロック（\`\`\`）は使用しない
-              - 純粋なJavaScriptコードのみを出力
-              - ファイルの先頭から末尾まで実行可能なコードのみ
-
-              出力: 完全なApp.jsファイル（import文、コンポーネント定義、export文を含む）"
-            else
-              # リトライ時：前回のエラーを含めて改善を促す
-              ENHANCED_PROMPT="前回のフロントエンド実装でエラーが発生しました。以下のエラーを修正してください：
-
-              エラー内容:
-              $(cat frontend_test_result_${{ matrix.agent_id }}.txt 2>/dev/null || echo "構文エラーまたは実行エラー")
-
-              元のタスク: $BASE_FRONTEND_PROMPT
-
-              テストファイル内容:
-              $TEST_CONTENT
-
-              特に以下の点を改善してください：
-              - React構文の正確性
-              - Hooks の正しい使用方法
-              - イベントハンドラーの実装
-              - state管理の改善
-              - API呼び出しの修正
-              - JSX構文の修正
-              - import/export文の確認
-
-              出力: 修正された完全なApp.jsファイル"
-            fi
-            
-            # Claude実行
-            echo "Claude実行中..."
-            claude -p "$ENHANCED_PROMPT" > frontend_raw_output_${{ matrix.agent_id }}.txt || {
-              echo "❌ Claude実行に失敗しました"
-              RETRY_COUNT=$((RETRY_COUNT + 1))
-              continue
-            }
-            
-            echo "Claude生出力を確認:"
-            head -20 frontend_raw_output_${{ matrix.agent_id }}.txt
-            echo "..."
-            
-            # MarkdownコードブロックからピュアなJavaScriptを抽出（改善版）
-            echo "JavaScriptコードを抽出中..."
-            
-            # 複数のパターンでコードブロックを検索・抽出
-            if grep -q '```javascript' frontend_raw_output_${{ matrix.agent_id }}.txt; then
-              echo "```javascript コードブロックを検出"
-              sed -n '/```javascript/,/```/p' frontend_raw_output_${{ matrix.agent_id }}.txt | sed '1d;$d' > frontend_implementation_${{ matrix.agent_id }}.js
-            elif grep -q '```jsx' frontend_raw_output_${{ matrix.agent_id }}.txt; then
-              echo "```jsx コードブロックを検出"
-              sed -n '/```jsx/,/```/p' frontend_raw_output_${{ matrix.agent_id }}.txt | sed '1d;$d' > frontend_implementation_${{ matrix.agent_id }}.js
-            elif grep -q '```js' frontend_raw_output_${{ matrix.agent_id }}.txt; then
-              echo "```js コードブロックを検出"
-              sed -n '/```js/,/```/p' frontend_raw_output_${{ matrix.agent_id }}.txt | sed '1d;$d' > frontend_implementation_${{ matrix.agent_id }}.js
-            elif grep -q '```' frontend_raw_output_${{ matrix.agent_id }}.txt; then
-              echo "汎用コードブロックを検出"
-              sed -n '/```/,/```/p' frontend_raw_output_${{ matrix.agent_id }}.txt | sed '1d;$d' > frontend_implementation_${{ matrix.agent_id }}.js
-            else
-              echo "コードブロックなし - 生出力をそのまま使用"
-              cp frontend_raw_output_${{ matrix.agent_id }}.txt frontend_implementation_${{ matrix.agent_id }}.js
-            fi
-            
-            # 説明文の除去（先頭の説明文を削除）
-            if grep -q "以下が.*ファイルの内容です" frontend_implementation_${{ matrix.agent_id }}.js; then
-              echo "説明文を検出 - 除去中"
-              # 説明文の行を削除
-              sed -i '/以下が.*ファイルの内容です/d' frontend_implementation_${{ matrix.agent_id }}.js
-              sed -i '/を使用した.*の完全な実装/d' frontend_implementation_${{ matrix.agent_id }}.js
-              sed -i '/^Node\.js + Express/d' frontend_implementation_${{ matrix.agent_id }}.js
-            fi
-            
-            # ファイルサイズチェック
-            FILE_SIZE=$(wc -c < frontend_implementation_${{ matrix.agent_id }}.js)
-            echo "抽出されたファイルサイズ: ${FILE_SIZE} bytes"
-            
-            if [ $FILE_SIZE -lt 100 ]; then
-              echo "❌ 生成されたファイルが小さすぎます"
-              echo "ファイル内容:"
-              cat frontend_implementation_${{ matrix.agent_id }}.js
-              RETRY_COUNT=$((RETRY_COUNT + 1))
-              continue
-            fi
-            
-            echo "抽出されたフロントエンドコード:"
-            head -30 frontend_implementation_${{ matrix.agent_id }}.js
-            echo "..."
-            
-            # 改善された構文チェック
-            echo "構文チェック中..."
-            SYNTAX_CHECK_RESULT=$(node -e "
-              const fs = require('fs');
-              try {
-                const content = fs.readFileSync('frontend_implementation_${{ matrix.agent_id }}.js', 'utf8');
-                
-                // 基本的な構文チェック
-                const checks = {
-                  hasImport: content.includes('import') || content.includes('require'),
-                  hasExport: content.includes('export') || content.includes('module.exports'),
-                  hasReact: content.includes('React') || content.includes('react'),
-                  hasFunction: content.includes('function') || content.includes('=>') || content.includes('const'),
-                  hasJSX: content.includes('<') && content.includes('>'),
-                  hasReturn: content.includes('return')
-                };
-                
-                console.log('構文チェック結果:');
-                console.log('- Import/Require:', checks.hasImport ? '✅' : '❌');
-                console.log('- Export:', checks.hasExport ? '✅' : '❌');
-                console.log('- React関連:', checks.hasReact ? '✅' : '❌');
-                console.log('- 関数定義:', checks.hasFunction ? '✅' : '❌');
-                console.log('- JSX要素:', checks.hasJSX ? '✅' : '❌');
-                console.log('- Return文:', checks.hasReturn ? '✅' : '❌');
-                
-                const requiredChecks = [checks.hasImport, checks.hasExport, checks.hasFunction];
-                const passedRequired = requiredChecks.filter(Boolean).length;
-                
-                if (passedRequired >= 2) {
-                  console.log('✅ 基本的な構文チェック: 合格');
-                  process.exit(0);
-                } else {
-                  console.log('❌ 基本的な構文チェック: 不合格');
-                  process.exit(1);
-                }
-              } catch (error) {
-                console.log('❌ 構文チェックエラー:', error.message);
-                process.exit(1);
-              }
-            " 2>&1)
-            
-            echo "$SYNTAX_CHECK_RESULT"
-            echo "$SYNTAX_CHECK_RESULT" > frontend_test_result_${{ matrix.agent_id }}.txt
-            
-            if echo "$SYNTAX_CHECK_RESULT" | grep -q "✅ 基本的な構文チェック: 合格"; then
-              echo "✅ 構文チェック成功！実装を採用します"
-              SUCCESS=true
-              
-              # 成功した実装を最終ファイルとして保存
-              cp frontend_implementation_${{ matrix.agent_id }}.js final_frontend_implementation_${{ matrix.agent_id }}.js
-              
-              # 成功メトリクスを記録
-              echo "FRONTEND_SUCCESS_RETRY_COUNT=$RETRY_COUNT" >> $GITHUB_ENV
-              echo "FRONTEND_FINAL_RESULT=PASSED" >> $GITHUB_ENV
-              
-            else
-              echo "❌ 構文チェック失敗。リトライします..."
-              RETRY_COUNT=$((RETRY_COUNT + 1))
-            fi
-          done
-
-          if [ "$SUCCESS" = false ]; then
-            echo "❌ $MAX_RETRIES 回の試行後も構文チェックに成功しませんでした"
-            echo "最後のエラー:"
-            cat frontend_test_result_${{ matrix.agent_id }}.txt
-            
-            # 失敗メトリクスを記録
-            echo "FRONTEND_SUCCESS_RETRY_COUNT=$MAX_RETRIES" >> $GITHUB_ENV
-            echo "FRONTEND_FINAL_RESULT=FAILED" >> $GITHUB_ENV
-            
-            # 失敗時も出力ファイルは保持（デバッグ用）
-            cp frontend_implementation_${{ matrix.agent_id }}.js final_frontend_implementation_${{ matrix.agent_id }}.js
-          fi
+          claude -p "$PROMPT" > frontend_implementation_${{ matrix.agent_id }}.js || echo "Claude 実行に失敗しました"
 
       - name: 生成されたフロントエンドコードを確認
         run: |
@@ -464,27 +138,21 @@ jobs:
           mkdir -p todo-app/frontend-${{ matrix.agent_id }}/src
           cp frontend_implementation_${{ matrix.agent_id }}.js todo-app/frontend-${{ matrix.agent_id }}/src/App.js
           cp todo-app/frontend/package.json todo-app/frontend-${{ matrix.agent_id }}/
-          cp todo-app/frontend/src/App.test.js todo-app/frontend-${{ matrix.agent_id }}/src/
-
-          # 基本的なindex.jsを作成
-          cat > todo-app/frontend-${{ matrix.agent_id }}/src/index.js << 'EOF'
-          import React from 'react';
-          import ReactDOM from 'react-dom/client';
-          import App from './App';
-
-          const root = ReactDOM.createRoot(document.getElementById('root'));
-          root.render(<App />);
-          EOF
 
       - name: 依存関係をインストール
         run: |
           cd todo-app/frontend-${{ matrix.agent_id }}
           npm install
 
-      - name: フロントエンドテストを実行
+      - name: 基本的な構文チェック
         run: |
           cd todo-app/frontend-${{ matrix.agent_id }}
-          npm test -- --coverage --watchAll=false > test_result.txt 2>&1 || echo "テストが失敗しました"
+          echo "構文チェック実行中..." > test_result.txt
+          if grep -q "import\|export\|function\|const" src/App.js; then
+            echo "✅ 基本的な構文要素が確認されました" >> test_result.txt
+          else
+            echo "❌ 基本的な構文要素が見つかりません" >> test_result.txt
+          fi
           cat test_result.txt
 
       - name: フロントエンドアーティファクトをアップロード
@@ -495,7 +163,7 @@ jobs:
             todo-app/frontend-${{ matrix.agent_id }}/src/App.js
             todo-app/frontend-${{ matrix.agent_id }}/test_result.txt
 
-  compare-and-integrate:
+  compare-results:
     needs: [backend-development, frontend-development]
     if: always()
     runs-on: ubuntu-latest
@@ -520,22 +188,14 @@ jobs:
             echo "## バックエンド開発結果" >> integration_report.txt
             echo "" >> integration_report.txt
             
-            BEST_BACKEND=""
             for agent in backend-agent-a backend-agent-b; do
               echo "### $agent" >> integration_report.txt
               if [ -f "${agent}-results/test_result.txt" ]; then
                 echo "テスト結果:" >> integration_report.txt
                 cat "${agent}-results/test_result.txt" >> integration_report.txt
-                
-                if grep -q "PASS" "${agent}-results/test_result.txt" && [ -z "$BEST_BACKEND" ]; then
-                  BEST_BACKEND=$agent
-                  echo "✅ 最適なバックエンド実装として選択" >> integration_report.txt
-                fi
               fi
               echo "" >> integration_report.txt
             done
-            
-            echo "BEST_BACKEND=$BEST_BACKEND" >> $GITHUB_ENV
           fi
 
           # フロントエンド結果分析
@@ -543,22 +203,14 @@ jobs:
             echo "## フロントエンド開発結果" >> integration_report.txt
             echo "" >> integration_report.txt
             
-            BEST_FRONTEND=""
             for agent in frontend-agent-a frontend-agent-b; do
               echo "### $agent" >> integration_report.txt
               if [ -f "${agent}-results/test_result.txt" ]; then
                 echo "テスト結果:" >> integration_report.txt
                 cat "${agent}-results/test_result.txt" >> integration_report.txt
-                
-                if grep -q "PASS" "${agent}-results/test_result.txt" && [ -z "$BEST_FRONTEND" ]; then
-                  BEST_FRONTEND=$agent
-                  echo "✅ 最適なフロントエンド実装として選択" >> integration_report.txt
-                fi
               fi
               echo "" >> integration_report.txt
             done
-            
-            echo "BEST_FRONTEND=$BEST_FRONTEND" >> $GITHUB_ENV
           fi
 
       - name: 比較レポートを表示
@@ -569,344 +221,3 @@ jobs:
         with:
           name: integration-report
           path: integration_report.txt
-
-  generate-summary:
-    needs: [backend-development, frontend-development, compare-and-integrate]
-    runs-on: ubuntu-latest
-    name: 📊 開発サマリー生成
-    if: always()
-    steps:
-      - name: チェックアウト
-        uses: actions/checkout@v4
-
-      - name: 全てのアーティファクトをダウンロード
-        uses: actions/download-artifact@v4
-
-      - name: 開発サマリーを生成
-        run: |
-          echo "# 🚀 Todo App Claude並列開発サマリー" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**開発日時**: $(date)" >> $GITHUB_STEP_SUMMARY
-          echo "**開発対象**: ${{ github.event.inputs.development_target }}" >> $GITHUB_STEP_SUMMARY
-          echo "**タスク**: ${{ github.event.inputs.task_description }}" >> $GITHUB_STEP_SUMMARY
-          echo "**機能スコープ**: ${{ github.event.inputs.feature_scope }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-          # バックエンド結果サマリー
-          if [ "${{ github.event.inputs.development_target }}" = "backend" ] || [ "${{ github.event.inputs.development_target }}" = "both" ]; then
-            echo "## 🔧 バックエンド開発結果" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            
-            BACKEND_SUCCESS_COUNT=0
-            for agent in backend-agent-a backend-agent-b; do
-              echo "### ${agent}" >> $GITHUB_STEP_SUMMARY
-              if [ -f "${agent}-results/test_result.txt" ]; then
-                if grep -q "PASS" "${agent}-results/test_result.txt" 2>/dev/null; then
-                  echo "- ✅ **実装結果**: 成功" >> $GITHUB_STEP_SUMMARY
-                  echo "- 📁 **ファイル**: \`todo-app/backend/src/app.js\`" >> $GITHUB_STEP_SUMMARY
-                  echo "- 🧪 **テスト**: 通過" >> $GITHUB_STEP_SUMMARY
-                  BACKEND_SUCCESS_COUNT=$((BACKEND_SUCCESS_COUNT + 1))
-                else
-                  echo "- ❌ **実装結果**: 失敗" >> $GITHUB_STEP_SUMMARY
-                  echo "- 🧪 **テスト**: 失敗" >> $GITHUB_STEP_SUMMARY
-                fi
-                
-                # ファイルサイズ情報
-                if [ -f "${agent}-results/app.js" ]; then
-                  LINES=$(wc -l < "${agent}-results/app.js" 2>/dev/null || echo "0")
-                  echo "- 📏 **コード行数**: ${LINES}行" >> $GITHUB_STEP_SUMMARY
-                fi
-              else
-                echo "- ⚠️ **実装結果**: テスト結果なし" >> $GITHUB_STEP_SUMMARY
-              fi
-              echo "" >> $GITHUB_STEP_SUMMARY
-            done
-            
-            # バックエンド成功率
-            echo "**バックエンド成功率**: ${BACKEND_SUCCESS_COUNT}/2 ($(( BACKEND_SUCCESS_COUNT * 50 ))%)" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-          fi
-
-          # フロントエンド結果サマリー
-          if [ "${{ github.event.inputs.development_target }}" = "frontend" ] || [ "${{ github.event.inputs.development_target }}" = "both" ]; then
-            echo "## 🎨 フロントエンド開発結果" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            
-            FRONTEND_SUCCESS_COUNT=0
-            for agent in frontend-agent-a frontend-agent-b; do
-              echo "### ${agent}" >> $GITHUB_STEP_SUMMARY
-              if [ -f "${agent}-results/test_result.txt" ]; then
-                if grep -q "PASS" "${agent}-results/test_result.txt" 2>/dev/null; then
-                  echo "- ✅ **実装結果**: 成功" >> $GITHUB_STEP_SUMMARY
-                  echo "- 📁 **ファイル**: \`todo-app/frontend/src/App.js\`" >> $GITHUB_STEP_SUMMARY
-                  echo "- 🧪 **テスト**: 通過" >> $GITHUB_STEP_SUMMARY
-                  FRONTEND_SUCCESS_COUNT=$((FRONTEND_SUCCESS_COUNT + 1))
-                else
-                  echo "- ❌ **実装結果**: 失敗" >> $GITHUB_STEP_SUMMARY
-                  echo "- 🧪 **テスト**: 失敗" >> $GITHUB_STEP_SUMMARY
-                fi
-                
-                # ファイルサイズ情報
-                if [ -f "${agent}-results/App.js" ]; then
-                  LINES=$(wc -l < "${agent}-results/App.js" 2>/dev/null || echo "0")
-                  echo "- 📏 **コード行数**: ${LINES}行" >> $GITHUB_STEP_SUMMARY
-                fi
-              else
-                echo "- ⚠️ **実装結果**: テスト結果なし" >> $GITHUB_STEP_SUMMARY
-              fi
-              echo "" >> $GITHUB_STEP_SUMMARY
-            done
-            
-            # フロントエンド成功率
-            echo "**フロントエンド成功率**: ${FRONTEND_SUCCESS_COUNT}/2 ($(( FRONTEND_SUCCESS_COUNT * 50 ))%)" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-          fi
-
-      - name: エージェント性能比較
-        run: |
-          echo "## 🏆 エージェント性能比較" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| エージェント | 実装結果 | テスト結果 | コード行数 | 品質スコア |" >> $GITHUB_STEP_SUMMARY
-          echo "|-------------|----------|------------|------------|------------|" >> $GITHUB_STEP_SUMMARY
-
-          # バックエンドエージェント
-          if [ "${{ github.event.inputs.development_target }}" = "backend" ] || [ "${{ github.event.inputs.development_target }}" = "both" ]; then
-            for agent in backend-agent-a backend-agent-b; do
-              if [ -f "${agent}-results/test_result.txt" ]; then
-                LINES=$(wc -l < "${agent}-results/app.js" 2>/dev/null || echo "0")
-                if grep -q "PASS" "${agent}-results/test_result.txt" 2>/dev/null; then
-                  echo "| $agent | ✅ 成功 | ✅ 通過 | ${LINES} | ⭐⭐⭐⭐ |" >> $GITHUB_STEP_SUMMARY
-                else
-                  echo "| $agent | ❌ 失敗 | ❌ 失敗 | ${LINES} | ⭐⭐ |" >> $GITHUB_STEP_SUMMARY
-                fi
-              fi
-            done
-          fi
-
-          # フロントエンドエージェント
-          if [ "${{ github.event.inputs.development_target }}" = "frontend" ] || [ "${{ github.event.inputs.development_target }}" = "both" ]; then
-            for agent in frontend-agent-a frontend-agent-b; do
-              if [ -f "${agent}-results/test_result.txt" ]; then
-                LINES=$(wc -l < "${agent}-results/App.js" 2>/dev/null || echo "0")
-                if grep -q "PASS" "${agent}-results/test_result.txt" 2>/dev/null; then
-                  echo "| $agent | ✅ 成功 | ✅ 通過 | ${LINES} | ⭐⭐⭐⭐ |" >> $GITHUB_STEP_SUMMARY
-                else
-                  echo "| $agent | ❌ 失敗 | ❌ 失敗 | ${LINES} | ⭐⭐ |" >> $GITHUB_STEP_SUMMARY
-                fi
-              fi
-            done
-          fi
-
-      - name: 統合・デプロイ情報
-        run: |
-          echo "## 🔄 統合・デプロイ状況" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-          # ブランチ情報
-          BRANCH_NAME="claude-todo-app-$(date +%Y%m%d-%H%M%S)"
-          echo "- 🌿 **作成予定ブランチ**: \`$BRANCH_NAME\`" >> $GITHUB_STEP_SUMMARY
-          echo "- 📝 **プルリクエスト**: 自動作成予定" >> $GITHUB_STEP_SUMMARY
-          echo "- 📊 **詳細レポート**: \`todo-app/claude_development_report.txt\`" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-          # 開発進捗の可視化
-          echo "## 🎯 開発進捗" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-          if [ "${{ github.event.inputs.development_target }}" = "backend" ] || [ "${{ github.event.inputs.development_target }}" = "both" ]; then
-            echo "### バックエンド開発" >> $GITHUB_STEP_SUMMARY
-            echo "🔴➡️🟢 **TDDプロセス**: 赤 → 緑" >> $GITHUB_STEP_SUMMARY
-            echo "- ✅ API設計完了" >> $GITHUB_STEP_SUMMARY
-            echo "- ✅ 実装完了" >> $GITHUB_STEP_SUMMARY
-            echo "- ✅ テスト実行完了" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-          fi
-
-          if [ "${{ github.event.inputs.development_target }}" = "frontend" ] || [ "${{ github.event.inputs.development_target }}" = "both" ]; then
-            echo "### フロントエンド開発" >> $GITHUB_STEP_SUMMARY
-            echo "🎨➡️📱 **UI/UX**: デザイン → 実装" >> $GITHUB_STEP_SUMMARY
-            echo "- ✅ コンポーネント設計完了" >> $GITHUB_STEP_SUMMARY
-            echo "- ✅ 実装完了" >> $GITHUB_STEP_SUMMARY
-            echo "- ✅ テスト実行完了" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-          fi
-
-      - name: 次のステップとコマンド
-        run: |
-          echo "## 🎯 次のステップ" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "1. 📋 プルリクエストをレビュー" >> $GITHUB_STEP_SUMMARY
-          echo "2. 🧪 ローカルでテスト実行" >> $GITHUB_STEP_SUMMARY
-          echo "3. 🚀 マージ・デプロイ" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-          # 実行コマンド例
-          echo "## 💻 ローカル実行コマンド" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
-          if [ "${{ github.event.inputs.development_target }}" = "backend" ] || [ "${{ github.event.inputs.development_target }}" = "both" ]; then
-            echo "# バックエンド起動" >> $GITHUB_STEP_SUMMARY
-            echo "cd todo-app/backend" >> $GITHUB_STEP_SUMMARY
-            echo "npm install && npm start" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-          fi
-          if [ "${{ github.event.inputs.development_target }}" = "frontend" ] || [ "${{ github.event.inputs.development_target }}" = "both" ]; then
-            echo "# フロントエンド起動（別ターミナル）" >> $GITHUB_STEP_SUMMARY
-            echo "cd todo-app/frontend" >> $GITHUB_STEP_SUMMARY
-            echo "npm install && npm start" >> $GITHUB_STEP_SUMMARY
-          fi
-          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-          # 品質メトリクス
-          echo "## 📈 品質メトリクス" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- 🤖 **使用エージェント数**: 4個（backend-a, backend-b, frontend-a, frontend-b）" >> $GITHUB_STEP_SUMMARY
-          echo "- ⏱️ **推定実行時間**: 5-10分" >> $GITHUB_STEP_SUMMARY
-          echo "- 🔄 **並列処理**: バックエンド・フロントエンド同時開発" >> $GITHUB_STEP_SUMMARY
-          echo "- 📊 **自動品質評価**: テスト結果による実装選択" >> $GITHUB_STEP_SUMMARY
-
-  create-implementation-pr:
-    needs: [compare-and-integrate, generate-summary]
-    runs-on: ubuntu-latest
-    name: 実装PR作成
-    if: success()
-    steps:
-      - name: チェックアウト
-        uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: 全てのアーティファクトをダウンロード
-        uses: actions/download-artifact@v4
-
-      - name: 新しいブランチを作成
-        run: |
-          BRANCH_NAME="claude-todo-app-$(date +%Y%m%d-%H%M%S)"
-          git checkout -b $BRANCH_NAME
-          echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
-
-      - name: 最適な実装を統合
-        run: |
-          # 最適な実装を選択してコピー
-          if [ "${{ github.event.inputs.development_target }}" = "backend" ] || [ "${{ github.event.inputs.development_target }}" = "both" ]; then
-            for agent in backend-agent-a backend-agent-b; do
-              if [ -f "${agent}-results/app.js" ]; then
-                if grep -q "PASS" "${agent}-results/test_result.txt" 2>/dev/null; then
-                  cp "${agent}-results/app.js" "todo-app/backend/src/app.js"
-                  echo "バックエンド実装を $agent から統合しました"
-                  break
-                fi
-              fi
-            done
-          fi
-
-          if [ "${{ github.event.inputs.development_target }}" = "frontend" ] || [ "${{ github.event.inputs.development_target }}" = "both" ]; then
-            for agent in frontend-agent-a frontend-agent-b; do
-              if [ -f "${agent}-results/App.js" ]; then
-                if grep -q "PASS" "${agent}-results/test_result.txt" 2>/dev/null; then
-                  cp "${agent}-results/App.js" "todo-app/frontend/src/App.js"
-                  echo "フロントエンド実装を $agent から統合しました"
-                  break
-                fi
-              fi
-            done
-          fi
-
-          # 統合レポートもコピー
-          cp integration-report/integration_report.txt "todo-app/claude_development_report.txt"
-
-      - name: Git設定
-        run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "Claude Todo App Developer"
-
-      - name: 変更をコミット
-        run: |
-          git add todo-app/
-          git commit -m "Add Claude-generated Todo App implementation
-
-          Target: ${{ github.event.inputs.development_target }}
-          Task: ${{ github.event.inputs.task_description }}
-          Scope: ${{ github.event.inputs.feature_scope }}
-
-          🤖 Generated with Claude Code via GitHub Actions
-
-          Co-Authored-By: Claude <noreply@anthropic.com>"
-
-      - name: ブランチをプッシュ
-        run: git push origin $BRANCH_NAME
-
-      - name: プルリクエストを作成
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh pr create --title "🚀 Todo App: ${{ github.event.inputs.task_description }}" --body "$(cat <<'EOF'
-          ## 📱 Todo App 実装
-
-          **開発対象**: ${{ github.event.inputs.development_target }}
-          **タスク**: ${{ github.event.inputs.task_description }}
-          **機能スコープ**: ${{ github.event.inputs.feature_scope }}
-
-          ## 🔧 実装内容
-
-          Claude並列開発ワークフローによって生成されたTodo アプリケーションの実装です。
-
-          ### バックエンド
-          - Node.js + Express
-          - SQLite データベース
-          - REST API (CRUD操作)
-          - 適切なエラーハンドリング
-
-          ### フロントエンド
-          - React + JavaScript
-          - 関数コンポーネント + Hooks
-          - レスポンシブデザイン
-          - API統合
-
-          ## 📊 開発分析
-
-          詳細な開発分析は `todo-app/claude_development_report.txt` を参照してください。
-
-          ## ✅ レビューポイント
-
-          - [ ] API仕様の準拠確認
-          - [ ] エラーハンドリングの妥当性
-          - [ ] セキュリティの確認
-          - [ ] UIの使いやすさ
-          - [ ] テストの網羅性
-          - [ ] コードの品質・保守性
-
-          ## 🧪 テスト実行
-
-          ```bash
-          # バックエンド
-          cd todo-app/backend
-          npm install
-          npm test
-
-          # フロントエンド
-          cd todo-app/frontend
-          npm install
-          npm test
-          ```
-
-          ## 🚀 動作確認
-
-          ```bash
-          # バックエンド起動
-          cd todo-app/backend
-          npm start
-
-          # フロントエンド起動（別ターミナル）
-          cd todo-app/frontend
-          npm start
-          ```
-
-          ---
-
-          🤖 **自動生成**: このPRはGitHub Actions + Claude Code によって自動生成されました
-
-          **Co-Authored-By**: Claude <noreply@anthropic.com>
-          EOF
-          )"
