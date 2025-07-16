@@ -87,6 +87,13 @@ jobs:
               5. エッジケース（0など）も考慮すること
 
               プログラミング言語: $LANG
+
+              出力形式の重要な指示:
+              - 説明文やコメントは一切含めない
+              - Markdownコードブロック（```）は使用しない
+              - 純粋な${LANG}コードのみを出力
+              - ファイルの先頭から末尾まで実行可能なコードのみ
+
               出力: 完全な実装ファイル（インポート文やコメントも含む）"
             else
               # リトライ時：前回のエラーを含めて改善を促す
@@ -113,13 +120,46 @@ jobs:
             
             # Claude実行
             echo "Claude実行中..."
-            claude -p "$ENHANCED_PROMPT" > output_${{ matrix.agent_id }}.$FILE_EXT || {
+            claude -p "$ENHANCED_PROMPT" > raw_output_${{ matrix.agent_id }}.$FILE_EXT || {
               echo "❌ Claude実行に失敗しました"
               RETRY_COUNT=$((RETRY_COUNT + 1))
               continue
             }
             
-            echo "生成されたコード:"
+            echo "Claude生出力を確認:"
+            head -20 raw_output_${{ matrix.agent_id }}.$FILE_EXT
+            echo "..."
+            
+            # Markdownコードブロックからピュアなコードを抽出
+            echo "コードを抽出中..."
+            if [ "$FILE_EXT" = "py" ]; then
+              if grep -q '```python' raw_output_${{ matrix.agent_id }}.$FILE_EXT; then
+                sed -n '/```python/,/```/p' raw_output_${{ matrix.agent_id }}.$FILE_EXT | sed '1d;$d' > output_${{ matrix.agent_id }}.$FILE_EXT
+              else
+                cp raw_output_${{ matrix.agent_id }}.$FILE_EXT output_${{ matrix.agent_id }}.$FILE_EXT
+              fi
+            else
+              # 他の言語の場合
+              if grep -q '```' raw_output_${{ matrix.agent_id }}.$FILE_EXT; then
+                sed -n '/```/,/```/p' raw_output_${{ matrix.agent_id }}.$FILE_EXT | sed '1d;$d' > output_${{ matrix.agent_id }}.$FILE_EXT
+              else
+                cp raw_output_${{ matrix.agent_id }}.$FILE_EXT output_${{ matrix.agent_id }}.$FILE_EXT
+              fi
+            fi
+            
+            # ファイルサイズチェック
+            FILE_SIZE=$(wc -c < output_${{ matrix.agent_id }}.$FILE_EXT)
+            echo "抽出されたファイルサイズ: ${FILE_SIZE} bytes"
+            
+            if [ $FILE_SIZE -lt 50 ]; then
+              echo "❌ 生成されたファイルが小さすぎます"
+              echo "ファイル内容:"
+              cat output_${{ matrix.agent_id }}.$FILE_EXT
+              RETRY_COUNT=$((RETRY_COUNT + 1))
+              continue
+            fi
+            
+            echo "抽出されたコード:"
             cat output_${{ matrix.agent_id }}.$FILE_EXT
             
             # テスト実行

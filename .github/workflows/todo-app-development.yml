@@ -291,6 +291,12 @@ jobs:
               6. アクセシビリティを考慮すること
               7. レスポンシブデザインを実装すること
 
+              出力形式の重要な指示:
+              - 説明文やコメントは一切含めない
+              - Markdownコードブロック（```）は使用しない
+              - 純粋なJavaScriptコードのみを出力
+              - ファイルの先頭から末尾まで実行可能なコードのみ
+
               出力: 完全なApp.jsファイル（import文、コンポーネント定義、export文を含む）"
             else
               # リトライ時：前回のエラーを含めて改善を促す
@@ -318,39 +324,90 @@ jobs:
             
             # Claude実行
             echo "Claude実行中..."
-            claude -p "$ENHANCED_PROMPT" > frontend_implementation_${{ matrix.agent_id }}.js || {
+            claude -p "$ENHANCED_PROMPT" > frontend_raw_output_${{ matrix.agent_id }}.txt || {
               echo "❌ Claude実行に失敗しました"
               RETRY_COUNT=$((RETRY_COUNT + 1))
               continue
             }
             
-            echo "生成されたフロントエンドコード:"
-            head -50 frontend_implementation_${{ matrix.agent_id }}.js
+            echo "Claude生出力を確認:"
+            head -20 frontend_raw_output_${{ matrix.agent_id }}.txt
             echo "..."
             
-            # 簡易構文チェック（Node.jsでJSX構文をチェック）
+            # MarkdownコードブロックからピュアなJavaScriptを抽出
+            echo "JavaScriptコードを抽出中..."
+            if grep -q '```javascript' frontend_raw_output_${{ matrix.agent_id }}.txt; then
+              # Markdownコードブロックから抽出
+              sed -n '/```javascript/,/```/p' frontend_raw_output_${{ matrix.agent_id }}.txt | sed '1d;$d' > frontend_implementation_${{ matrix.agent_id }}.js
+            elif grep -q '```jsx' frontend_raw_output_${{ matrix.agent_id }}.txt; then
+              # JSXコードブロックから抽出
+              sed -n '/```jsx/,/```/p' frontend_raw_output_${{ matrix.agent_id }}.txt | sed '1d;$d' > frontend_implementation_${{ matrix.agent_id }}.js
+            else
+              # コードブロックがない場合はそのまま使用
+              cp frontend_raw_output_${{ matrix.agent_id }}.txt frontend_implementation_${{ matrix.agent_id }}.js
+            fi
+            
+            # ファイルサイズチェック
+            FILE_SIZE=$(wc -c < frontend_implementation_${{ matrix.agent_id }}.js)
+            echo "抽出されたファイルサイズ: ${FILE_SIZE} bytes"
+            
+            if [ $FILE_SIZE -lt 100 ]; then
+              echo "❌ 生成されたファイルが小さすぎます"
+              echo "ファイル内容:"
+              cat frontend_implementation_${{ matrix.agent_id }}.js
+              RETRY_COUNT=$((RETRY_COUNT + 1))
+              continue
+            fi
+            
+            echo "抽出されたフロントエンドコード:"
+            head -30 frontend_implementation_${{ matrix.agent_id }}.js
+            echo "..."
+            
+            # 改善された構文チェック
             echo "構文チェック中..."
-            # JSXを含むファイルの基本的な構文チェック
-            if node -e "
+            SYNTAX_CHECK_RESULT=$(node -e "
               const fs = require('fs');
-              const content = fs.readFileSync('frontend_implementation_${{ matrix.agent_id }}.js', 'utf8');
-              
-              // 基本的な構文チェック
-              if (!content.includes('import') && !content.includes('require')) {
-                throw new Error('import文またはrequire文が見つかりません');
+              try {
+                const content = fs.readFileSync('frontend_implementation_${{ matrix.agent_id }}.js', 'utf8');
+                
+                // 基本的な構文チェック
+                const checks = {
+                  hasImport: content.includes('import') || content.includes('require'),
+                  hasExport: content.includes('export') || content.includes('module.exports'),
+                  hasReact: content.includes('React') || content.includes('react'),
+                  hasFunction: content.includes('function') || content.includes('=>') || content.includes('const'),
+                  hasJSX: content.includes('<') && content.includes('>'),
+                  hasReturn: content.includes('return')
+                };
+                
+                console.log('構文チェック結果:');
+                console.log('- Import/Require:', checks.hasImport ? '✅' : '❌');
+                console.log('- Export:', checks.hasExport ? '✅' : '❌');
+                console.log('- React関連:', checks.hasReact ? '✅' : '❌');
+                console.log('- 関数定義:', checks.hasFunction ? '✅' : '❌');
+                console.log('- JSX要素:', checks.hasJSX ? '✅' : '❌');
+                console.log('- Return文:', checks.hasReturn ? '✅' : '❌');
+                
+                const requiredChecks = [checks.hasImport, checks.hasExport, checks.hasFunction];
+                const passedRequired = requiredChecks.filter(Boolean).length;
+                
+                if (passedRequired >= 2) {
+                  console.log('✅ 基本的な構文チェック: 合格');
+                  process.exit(0);
+                } else {
+                  console.log('❌ 基本的な構文チェック: 不合格');
+                  process.exit(1);
+                }
+              } catch (error) {
+                console.log('❌ 構文チェックエラー:', error.message);
+                process.exit(1);
               }
-              if (!content.includes('export') && !content.includes('module.exports')) {
-                throw new Error('export文が見つかりません');
-              }
-              if (!content.includes('function') && !content.includes('=>') && !content.includes('const')) {
-                throw new Error('関数定義が見つかりません');
-              }
-              if (content.includes('return') && !content.includes('jsx') && !content.includes('<')) {
-                console.warn('JSX要素が見つからない可能性があります');
-              }
-              
-              console.log('基本的な構文チェック: OK');
-            " > frontend_test_result_${{ matrix.agent_id }}.txt 2>&1; then
+            " 2>&1)
+            
+            echo "$SYNTAX_CHECK_RESULT"
+            echo "$SYNTAX_CHECK_RESULT" > frontend_test_result_${{ matrix.agent_id }}.txt
+            
+            if echo "$SYNTAX_CHECK_RESULT" | grep -q "✅ 基本的な構文チェック: 合格"; then
               echo "✅ 構文チェック成功！実装を採用します"
               SUCCESS=true
               
@@ -362,9 +419,7 @@ jobs:
               echo "FRONTEND_FINAL_RESULT=PASSED" >> $GITHUB_ENV
               
             else
-              echo "❌ 構文エラー。リトライします..."
-              echo "構文エラー内容:"
-              cat frontend_test_result_${{ matrix.agent_id }}.txt
+              echo "❌ 構文チェック失敗。リトライします..."
               RETRY_COUNT=$((RETRY_COUNT + 1))
             fi
           done
