@@ -44,16 +44,52 @@ jobs:
       - name: Claude バージョン確認
         run: claude --version
 
-      - name: Claude にコード生成させる（${{ matrix.agent_id }}）
+      - name: Kamui式 Claude エージェント実行（${{ matrix.agent_id }}）
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
-          echo "▶ Claude に問い合わせます（Agent: ${{ matrix.agent_id }})"
-          PROMPT="${{ github.event.inputs.task_prompt || 'FizzBuzzをPython関数 fizzbuzz(n: int) -> str で実装してください。仕様：3の倍数はFizz、5の倍数はBuzz、15の倍数はFizzBuzz、それ以外は数字の文字列を返す。' }}"
+          echo "🤖 Kamui式 Claude エージェント起動（Agent: ${{ matrix.agent_id }})"
+
+          # テスト仕様を読み込んで責務を明確化
+          if [ -f "tests/test_fizzbuzz.py" ]; then
+            TEST_SPEC=$(cat tests/test_fizzbuzz.py)
+            echo "📋 テスト仕様を読み込みました"
+          else
+            TEST_SPEC="基本的なFizzBuzzテストを想定"
+          fi
+
+          # Kamui式プロンプト：責務と自由度を明確に定義
+          KAMUI_PROMPT="あなたは自律的な実装エージェント（${{ matrix.agent_id }}）です。
+
+          【責務】以下のテストを100%通過するコードを実装してください：
+          $TEST_SPEC
+
+          【自由度】実装方法は自由です。創造性を発揮してください：
+          - アルゴリズムの選択
+          - コードスタイル
+          - 最適化手法
+          - エラーハンドリング
+
+          【出力要求】
+          - Python関数 fizzbuzz(n: int) -> str を実装
+          - テストが通る完全なコードのみ出力
+          - 説明文は不要
+
+          【エージェント特性】
+          Agent-A: 堅実で読みやすい実装を重視
+          Agent-B: 創造的で効率的な実装を重視
+
+          実装してください："
+
           FILE_EXT="${{ github.event.inputs.file_extension || 'py' }}"
-          claude -p "$PROMPT" \
-          > output_${{ matrix.agent_id }}.$FILE_EXT \
-          || echo "Claude 実行に失敗しました"
+
+          echo "💭 Claude エージェント思考中..."
+          claude -p "$KAMUI_PROMPT" > output_${{ matrix.agent_id }}.$FILE_EXT || {
+            echo "❌ Claude エージェント実行失敗"
+            echo "# エラー: Claude実行に失敗しました" > output_${{ matrix.agent_id }}.$FILE_EXT
+          }
+
+          echo "✅ Claude エージェント完了（Agent: ${{ matrix.agent_id }}）"
 
       - name: Claude 出力確認
         run: |
@@ -104,10 +140,10 @@ jobs:
             modules/${{ matrix.agent_id }}/implementation.*
             modules/${{ matrix.agent_id }}/test_result.txt
 
-  compare-results:
+  kamui-evaluation:
     needs: generate-code
     runs-on: ubuntu-latest
-    name: 結果比較・評価
+    name: 🏆 Kamui式 エージェント評価・選定
     steps:
       - name: チェックアウト
         uses: actions/checkout@v4
@@ -115,38 +151,128 @@ jobs:
       - name: 全てのアーティファクトをダウンロード
         uses: actions/download-artifact@v4
 
-      - name: 結果を比較
+      - name: Kamui式 自律評価システム
         run: |
-          echo "=== エージェント結果比較 ===" > comparison_report.txt
-          echo "生成日時: $(date)" >> comparison_report.txt
-          echo "" >> comparison_report.txt
+          echo "🏆 === Kamui式 エージェント評価システム ===" > kamui_evaluation.txt
+          echo "評価日時: $(date)" >> kamui_evaluation.txt
+          echo "評価基準: テスト通過率、コード品質、創造性" >> kamui_evaluation.txt
+          echo "" >> kamui_evaluation.txt
+
+          # エージェント評価スコアリング
+          BEST_AGENT=""
+          BEST_SCORE=0
 
           for agent in agent-a agent-b; do
-            echo "--- $agent の結果 ---" >> comparison_report.txt
-            if [ -f "${agent}-results/test_result.txt" ]; then
-              echo "テスト結果:" >> comparison_report.txt
-              cat "${agent}-results/test_result.txt" >> comparison_report.txt
-            else
-              echo "テスト結果: ファイルが見つかりません" >> comparison_report.txt
-            fi
-            echo "" >> comparison_report.txt
+            echo "🤖 === エージェント評価: $agent ===" >> kamui_evaluation.txt
+            SCORE=0
             
-            echo "実装コード:" >> comparison_report.txt
-            if [ -f "${agent}-results/implementation.py" ]; then
-              head -20 "${agent}-results/implementation.py" >> comparison_report.txt
-            elif [ -f "${agent}-results/implementation.js" ]; then
-              head -20 "${agent}-results/implementation.js" >> comparison_report.txt
+            # 1. テスト通過評価（最重要）
+            if [ -f "${agent}-results/test_result.txt" ]; then
+              echo "📋 テスト結果:" >> kamui_evaluation.txt
+              cat "${agent}-results/test_result.txt" >> kamui_evaluation.txt
+              
+              if grep -q "PASSED\|passed" "${agent}-results/test_result.txt" && ! grep -q "FAILED\|failed" "${agent}-results/test_result.txt"; then
+                SCORE=$((SCORE + 100))
+                echo "✅ テスト通過: +100点" >> kamui_evaluation.txt
+              else
+                echo "❌ テスト失敗: +0点" >> kamui_evaluation.txt
+              fi
             else
-              echo "実装ファイルが見つかりません" >> comparison_report.txt
+              echo "⚠️ テスト結果なし: +0点" >> kamui_evaluation.txt
             fi
-            echo "" >> comparison_report.txt
+            
+            # 2. コード品質評価
+            if [ -f "${agent}-results/implementation.py" ]; then
+              CODE_LINES=$(wc -l < "${agent}-results/implementation.py")
+              CODE_SIZE=$(wc -c < "${agent}-results/implementation.py")
+              
+              echo "📏 コード行数: ${CODE_LINES}行" >> kamui_evaluation.txt
+              echo "📦 コードサイズ: ${CODE_SIZE}バイト" >> kamui_evaluation.txt
+              
+              # 適切なサイズボーナス（50-200行が理想）
+              if [ $CODE_LINES -ge 10 ] && [ $CODE_LINES -le 50 ]; then
+                SCORE=$((SCORE + 20))
+                echo "✅ 適切なコードサイズ: +20点" >> kamui_evaluation.txt
+              fi
+              
+              # 型ヒント・docstring評価
+              if grep -q "def fizzbuzz.*int.*str" "${agent}-results/implementation.py"; then
+                SCORE=$((SCORE + 10))
+                echo "✅ 型ヒント使用: +10点" >> kamui_evaluation.txt
+              fi
+              
+              if grep -q '"""' "${agent}-results/implementation.py"; then
+                SCORE=$((SCORE + 10))
+                echo "✅ docstring記述: +10点" >> kamui_evaluation.txt
+              fi
+              
+              echo "📄 実装コード（先頭20行）:" >> kamui_evaluation.txt
+              head -20 "${agent}-results/implementation.py" >> kamui_evaluation.txt
+            else
+              echo "❌ 実装ファイルなし: +0点" >> kamui_evaluation.txt
+            fi
+            
+            echo "🎯 総合スコア: ${SCORE}点" >> kamui_evaluation.txt
+            echo "" >> kamui_evaluation.txt
+            
+            # ベストエージェント判定
+            if [ $SCORE -gt $BEST_SCORE ]; then
+              BEST_SCORE=$SCORE
+              BEST_AGENT=$agent
+            fi
           done
 
-      - name: 比較結果を表示
-        run: cat comparison_report.txt
+          # 最終判定
+          echo "🏆 === 最終判定 ===" >> kamui_evaluation.txt
+          echo "🥇 ベストエージェント: $BEST_AGENT" >> kamui_evaluation.txt
+          echo "🎯 最高スコア: ${BEST_SCORE}点" >> kamui_evaluation.txt
+          echo "" >> kamui_evaluation.txt
 
-      - name: 比較レポートをアップロード
+          # エージェント特性分析
+          echo "🔍 === エージェント特性分析 ===" >> kamui_evaluation.txt
+          echo "Agent-A（堅実型）: 読みやすさと安定性を重視" >> kamui_evaluation.txt
+          echo "Agent-B（創造型）: 効率性と革新性を重視" >> kamui_evaluation.txt
+          echo "" >> kamui_evaluation.txt
+
+          # 環境変数に結果を保存
+          echo "KAMUI_BEST_AGENT=$BEST_AGENT" >> $GITHUB_ENV
+          echo "KAMUI_BEST_SCORE=$BEST_SCORE" >> $GITHUB_ENV
+
+      - name: Kamui評価結果を表示
+        run: |
+          echo "🏆 Kamui式評価完了！"
+          cat kamui_evaluation.txt
+
+      - name: Kamui評価レポートをアップロード
         uses: actions/upload-artifact@v4
         with:
-          name: comparison-report
-          path: comparison_report.txt
+          name: kamui-evaluation-report
+          path: kamui_evaluation.txt
+
+      - name: 🎯 Kamui式 ベスト実装の保存
+        run: |
+          if [ -n "$KAMUI_BEST_AGENT" ] && [ -f "${KAMUI_BEST_AGENT}-results/implementation.py" ]; then
+            echo "🥇 ベスト実装を保存中..."
+            cp "${KAMUI_BEST_AGENT}-results/implementation.py" kamui_best_implementation.py
+            
+            echo "# Kamui式 ベスト実装" > kamui_summary.md
+            echo "- **選定エージェント**: $KAMUI_BEST_AGENT" >> kamui_summary.md
+            echo "- **スコア**: ${KAMUI_BEST_SCORE}点" >> kamui_summary.md
+            echo "- **評価日時**: $(date)" >> kamui_summary.md
+            echo "" >> kamui_summary.md
+            echo "\`\`\`python" >> kamui_summary.md
+            cat kamui_best_implementation.py >> kamui_summary.md
+            echo "\`\`\`" >> kamui_summary.md
+            
+            echo "✅ Kamui式ベスト実装を保存しました"
+          else
+            echo "⚠️ 有効な実装が見つかりませんでした"
+          fi
+
+      - name: Kamui最終成果物をアップロード
+        uses: actions/upload-artifact@v4
+        with:
+          name: kamui-best-results
+          path: |
+            kamui_best_implementation.py
+            kamui_summary.md
